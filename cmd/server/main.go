@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"filexfer/protocol"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -22,9 +23,16 @@ var (
 	ErrFileTooLarge    = errors.New("file size exceeds maximum allowed size")
 )
 
+// Constants to constrain the maximum file size and log prefix.
 const (
 	MaxFileSize = 100 * 1024 * 1024 // 100MB limit.
 	LogPrefix   = "[SERVER]"        // Log prefix.
+)
+
+// Command-line flags.
+var (
+	listenPort = flag.String("port", "8080", "Listening port")
+	destDir    = flag.String("dir", "test", "Destination directory for received files")
 )
 
 // Function to configure structured logging with timestamps and custom prefix.
@@ -39,17 +47,14 @@ func validateHeader(header *protocol.Header) error {
 		return fmt.Errorf("header is nil")
 	}
 
-	// Check if the file name is empty.
 	if header.Filename == "" {
 		return fmt.Errorf("%w: filename cannot be empty", ErrEmptyFilename)
 	}
 
-	// Check if the file size is zero.
 	if header.FileSize == 0 {
 		return fmt.Errorf("%w: file size cannot be zero", ErrInvalidFileSize)
 	}
 
-	// Check if the file size exceeds the maximum allowed size.
 	if header.FileSize > MaxFileSize {
 		return fmt.Errorf("%w: file size %d exceeds maximum allowed size %d",
 			ErrFileTooLarge, header.FileSize, MaxFileSize)
@@ -101,14 +106,13 @@ func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
 	header, err := protocol.ReadHeader(conn)
 	if err != nil {
 		log.Printf("Failed to read file transfer header from %s: %v", clientAddr, err)
-		// Check if the error is an EOF error.
 		if errors.Is(err, io.EOF) {
 			log.Printf("Client %s disconnected before sending header", clientAddr)
 		}
-		// Check if the error is an unexpected (incomplete-read) EOF error.
 		if errors.Is(err, io.ErrUnexpectedEOF) {
 			log.Printf("Client %s sent incomplete header", clientAddr)
 		}
+		// Fallback to a generic message.
 		sendErrorResponse(conn, "Failed to read file header")
 		return
 	}
@@ -120,28 +124,30 @@ func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
 		return
 	}
 
-	log.Printf("Receiving file from %s: %s (size: %d bytes)", clientAddr, header.Filename, header.FileSize)
+	// Log transfer start.
+	log.Printf("Starting file transfer from %s: %s (size: %d bytes)", clientAddr, header.Filename, header.FileSize)
 
 	// Create the directory to save the received file (if it doesn't exist).
 	// `0755`: "OwnerCanDoAllExecuteGroupOtherCanReadExecute" (https://pkg.go.dev/gitlab.com/evatix-go/core/filemode).
-	receivedDir := "test"
-	if err := os.MkdirAll(receivedDir, 0755); err != nil {
-		log.Printf("Failed to create directory %s for client %s: %v", receivedDir, clientAddr, err)
+	if err := os.MkdirAll(*destDir, 0755); err != nil {
+		log.Printf("Failed to create directory %s for client %s: %v", *destDir, clientAddr, err)
 		sendErrorResponse(conn, "Failed to create output directory")
 		return
 	}
 
 	// Create the output file by first joining the received directory and the filename.
 	receivedFileName := "received_" + header.Filename
-	outputPath := filepath.Join(receivedDir, receivedFileName)
+	outputPath := filepath.Join(*destDir, receivedFileName)
 
 	// Note: Uncomment this if we want to prevent overwriting existing files.
 	// Check if the file already exists.
-	// if _, err := os.Stat(outputPath); err == nil {
-	// 	log.Printf("File already exists: %s", outputPath)
-	// 	sendErrorResponse(conn, "File already exists")
-	// 	return
-	// }
+	/*
+		if _, err := os.Stat(outputPath); err == nil {
+			log.Printf("File already exists: %s", outputPath)
+			sendErrorResponse(conn, "File already exists")
+			return
+		}
+	*/
 
 	// Create the output file.
 	outputFile, err := os.Create(outputPath)
@@ -159,32 +165,36 @@ func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
 	}()
 
 	// Read and write the file content with progress tracking.
-	bytesWritten, err := io.CopyN(outputFile, conn, int64(header.FileSize))
+	// Create a progress writer to track download progress.
+	progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Receiving %s", header.Filename))
+
+	bytesWritten, err := io.CopyN(progressWriter, conn, int64(header.FileSize))
 	if err != nil {
 		log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
-		// Check if the error is an EOF error.
 		if errors.Is(err, io.EOF) {
 			log.Printf("Client %s disconnected during file transfer", clientAddr)
 		}
-		// Check if the error is an unexpected (incomplete-read) EOF error.
 		if errors.Is(err, io.ErrUnexpectedEOF) {
 			log.Printf("Client %s sent incomplete file data", clientAddr)
 		}
+		// Fallback to a generic message.
 		sendErrorResponse(conn, "Failed to receive file content")
 
-		// Clean up the partial file.
+		// Clean up the incomplete file.
 		if err := os.Remove(outputPath); err != nil {
 			log.Printf("Failed to remove partial file %s: %v", outputPath, err)
 		}
 		return
 	}
 
+	// Mark transfer as complete and log the final statistics.
+	progressWriter.Complete()
+
 	// Verify if the bytes written are equal to the file size.
 	if bytesWritten != int64(header.FileSize) {
 		log.Printf("File size mismatch for client %s: expected %d, received %d",
 			clientAddr, header.FileSize, bytesWritten)
 		sendErrorResponse(conn, "File size mismatch")
-
 		// Clean up the incomplete file.
 		if err := os.Remove(outputPath); err != nil {
 			log.Printf("Failed to remove incomplete file %s: %v", outputPath, err)
@@ -199,18 +209,23 @@ func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
 		log.Printf("Failed to send success response to client %s: %v", clientAddr, err)
 	}
 
-	log.Printf("File received successfully from %s: %d bytes written to %s (duration: %v)",
-		clientAddr, bytesWritten, outputPath, time.Since(startTime))
+	transferDuration := time.Since(startTime)
+	transferRate := float64(bytesWritten) / transferDuration.Seconds() / 1024 / 1024 // MB/s.
+	log.Printf("File transfer completed from %s: %d bytes written to %s (duration: %v, rate: %.2f MB/s)",
+		clientAddr, bytesWritten, outputPath, transferDuration, transferRate)
 }
 
 func main() {
+	// Parse command-line flags.
+	flag.Parse()
+
 	// Setup structured logging.
 	setupLogging()
 
 	log.Printf("Starting file transfer server...")
 
-	// Establish a listener on port 8080 and listen for incoming connections.
-	listener, err := net.Listen("tcp", ":8080")
+	// Establish a listener on the specified port and listen for incoming connections.
+	listener, err := net.Listen("tcp", ":"+*listenPort)
 	if err != nil {
 		log.Fatalf("Failed to start listening for incoming connections: %v", err)
 	}
@@ -223,7 +238,7 @@ func main() {
 		log.Printf("Server listener closed")
 	}()
 
-	log.Printf("Server is listening on port 8080...")
+	log.Printf("Server is listening on port %s...", *listenPort)
 
 	// Create a wait group to wait for all connections ("a collection of goroutines") to finish.
 	var waitGroup sync.WaitGroup

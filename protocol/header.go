@@ -32,28 +32,23 @@ type Header struct {
 
 // validateHeader performs validation of header data
 func validateHeader(header *Header) error {
-	// Check if the header is nil.
 	if header == nil {
 		return fmt.Errorf("header is nil")
 	}
 
-	// Check if the file name is empty.
 	if header.Filename == "" {
 		return fmt.Errorf("%w: filename cannot be empty", ErrInvalidFilename)
 	}
 
-	// Check if the file name length exceeds the maximum allowed size.
 	if len(header.Filename) > FilenameSize {
 		return fmt.Errorf("%w: filename length %d exceeds the maximum %d",
 			ErrInvalidFilename, len(header.Filename), FilenameSize)
 	}
 
-	// Check if the file name contains null bytes.
 	if strings.ContainsRune(header.Filename, 0) {
 		return fmt.Errorf("%w: filename contains null bytes", ErrInvalidFilename)
 	}
 
-	// Check if the file size is zero.
 	if header.FileSize == 0 {
 		return fmt.Errorf("%w: file size cannot be zero", ErrInvalidFileSize)
 	}
@@ -63,12 +58,10 @@ func validateHeader(header *Header) error {
 
 // Function to write the header to the given writer.
 func WriteHeader(w io.Writer, header *Header) error {
-	// Check if the writer is nil.
 	if w == nil {
 		return fmt.Errorf("writer is nil")
 	}
 
-	// Validate the header.
 	if err := validateHeader(header); err != nil {
 		return fmt.Errorf("invalid header for writing: %w", err)
 	}
@@ -78,11 +71,9 @@ func WriteHeader(w io.Writer, header *Header) error {
 	binary.BigEndian.PutUint64(sizeBytes, header.FileSize)
 
 	n, err := w.Write(sizeBytes)
-	// Check if there was an error while writing the file size.
 	if err != nil {
 		return fmt.Errorf("failed to write file size: %w", err)
 	}
-	// Check if the file size (in bytes) was written correctly.
 	if n != 8 {
 		return fmt.Errorf("incomplete write of file size: wrote %d bytes, expected 8", n)
 	}
@@ -92,11 +83,9 @@ func WriteHeader(w io.Writer, header *Header) error {
 	copy(filenameBytes, []byte(header.Filename))
 
 	n, err = w.Write(filenameBytes)
-	// Check if there was an error while writing the file name.
 	if err != nil {
 		return fmt.Errorf("failed to write filename: %w", err)
 	}
-	// Check if the file name (in bytes) was written correctly.
 	if n != FilenameSize {
 		return fmt.Errorf("incomplete write of filename: wrote %d bytes, expected %d", n, FilenameSize)
 	}
@@ -106,7 +95,6 @@ func WriteHeader(w io.Writer, header *Header) error {
 
 // Function to read the header from the given reader.
 func ReadHeader(r io.Reader) (*Header, error) {
-	// Check if the reader is nil.
 	if r == nil {
 		return nil, fmt.Errorf("reader is nil")
 	}
@@ -116,20 +104,15 @@ func ReadHeader(r io.Reader) (*Header, error) {
 
 	n, err := io.ReadFull(r, headerBytes)
 	if err != nil {
-		// Check if the error is an EOF error.
 		if errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("unexpected end of stream while reading header: %w", err)
 		}
-		// Check if the error is an unexpected (incomplete-read) EOF error.
 		if errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, fmt.Errorf("incomplete header read: got %d bytes, expected %d: %w",
 				n, HeaderSize, err)
 		}
-		// Check if the error is a general read error.
 		return nil, fmt.Errorf("failed to read header: %w", err)
 	}
-
-	// Check if the number of bytes read is not equal to the header size.
 	if n != HeaderSize {
 		return nil, fmt.Errorf("%w: read %d bytes, expected %d", ErrInvalidHeaderSize, n, HeaderSize)
 	}
@@ -155,7 +138,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 		filename = string(filenameBytes)
 	}
 
-	// Create header and validate it.
+	// Create and validate the header.
 	header := &Header{
 		FileSize: fileSize,
 		Filename: filename,
