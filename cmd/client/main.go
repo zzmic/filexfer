@@ -52,7 +52,7 @@ func setupLogging() {
 // Function to validate command-line arguments
 func validateArgs() error {
 	if *filePath == "" {
-		return fmt.Errorf("file path is required. Use -file flag to specify the source file")
+		return fmt.Errorf("file path is required: use -file flag to specify the source file")
 	}
 
 	return nil
@@ -69,7 +69,7 @@ func validateFile(filePath string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("%w: %s", ErrFileNotFound, filePath)
 		}
-		return fmt.Errorf("failed to stat file %s: %w", filePath, err)
+		return fmt.Errorf("failed to get file information for %s: %w", filePath, err)
 	}
 
 	if fileInfo.IsDir() {
@@ -235,10 +235,10 @@ func main() {
 
 	// Set connection timeouts.
 	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
-		log.Fatalf("Failed to set a read deadline: %v", err)
+		log.Fatalf("Failed to set read deadline: %v", err)
 	}
 	if err := conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
-		log.Fatalf("Failed to set a write deadline: %v", err)
+		log.Fatalf("Failed to set write deadline: %v", err)
 	}
 
 	// Send the header first.

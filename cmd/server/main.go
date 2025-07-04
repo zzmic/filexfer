@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -22,6 +23,13 @@ var (
 	ErrInvalidFileSize = errors.New("invalid file size")
 	ErrEmptyFilename   = errors.New("empty filename")
 	ErrFileTooLarge    = errors.New("file size exceeds maximum allowed size")
+)
+
+// Constants to represent the file conflict handling strategies.
+const (
+	StrategyOverwrite = "overwrite" // Overwrite the existing file.
+	StrategyRename    = "rename"    // Rename the file to avoid conflicts.
+	StrategySkip      = "skip"      // Skip the file if it already exists.
 )
 
 // Constants to constrain the maximum file size, log prefix, and timeouts.
@@ -35,8 +43,9 @@ const (
 
 // Command-line flags.
 var (
-	listenPort = flag.String("port", "8080", "Listening port")
-	destDir    = flag.String("dir", "test", "Destination directory for received files")
+	listenPort   = flag.String("port", "8080", "Listening port")
+	destDir      = flag.String("dir", "test", "Destination directory for received files")
+	fileStrategy = flag.String("strategy", "rename", "File conflict strategy: overwrite, rename, or skip")
 )
 
 // Function to configure structured logging with timestamps and custom prefix.
@@ -80,6 +89,57 @@ func sendErrorResponse(conn net.Conn, message string) {
 	}
 }
 
+// Function to handle file conflicts by applying the specified strategy.
+func handleFileConflict(originalPath, filename string, strategy string) (string, error) {
+	// Check if the file exists.
+	if _, err := os.Stat(originalPath); os.IsNotExist(err) {
+		// If the file doesn't exist, return the original path.
+		return originalPath, nil
+	}
+
+	switch strategy {
+	case StrategyOverwrite:
+		// Remove the existing file and return the original path.
+		if err := os.Remove(originalPath); err != nil {
+			return "", fmt.Errorf("failed to remove existing file: %v", err)
+		}
+		log.Printf("Overwriting existing file: %s", originalPath)
+		return originalPath, nil
+
+	case StrategyRename:
+		// Generate a new filename with a suffix.
+		return generateUniqueFilename(originalPath, filename), nil
+
+	case StrategySkip:
+		// Return an error to indicate that the file should be skipped.
+		return "", fmt.Errorf("file already exists and skip strategy is enabled: %s", originalPath)
+
+	default:
+		return "", fmt.Errorf("unknown file conflict strategy: %s", strategy)
+	}
+}
+
+// Function to generate a unique filename by adding a numeric suffix.
+func generateUniqueFilename(originalPath, filename string) string {
+	dir := filepath.Dir(originalPath)
+	ext := filepath.Ext(filename)
+	baseName := strings.TrimSuffix(filename, ext)
+
+	counter := 1
+	for {
+		newFilename := fmt.Sprintf("%s_%d%s", baseName, counter, ext)
+		newPath := filepath.Join(dir, newFilename)
+
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			// If the file doesn't exist, return the new path.
+			log.Printf("Renaming file to avoid conflict: %s -> %s", filename, newFilename)
+			return newPath
+		}
+		// Increment the counter and try again if the file already exists.
+		counter++
+	}
+}
+
 // Struct to wrap a net.Conn to support context cancellation and coordination of the transfer with shutdown.
 type contextReader struct {
 	ctx  context.Context
@@ -107,12 +167,12 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 
 	// Set connection timeouts to prevent hanging connections.
 	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
-		log.Printf("Failed to set a read deadline for %s: %v", clientAddr, err)
+		log.Printf("Failed to set read deadline: %v", err)
 		sendErrorResponse(conn, "Internal server error")
 		return
 	}
 	if err := conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
-		log.Printf("Failed to set a write deadline for %s: %v", clientAddr, err)
+		log.Printf("Failed to set write deadline: %v", err)
 		sendErrorResponse(conn, "Internal server error")
 		return
 	}
@@ -150,24 +210,27 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		return
 	}
 
-	// Create the output file name by prepending "received_" to the original file name.
+	// Augment the file name with "received_" to indicate that the file is received.
 	receivedFileName := "received_" + header.Filename
 	outputPath := filepath.Join(*destDir, receivedFileName)
 
-	// NOTE: Uncomment this if we want to prevent overwriting existing files.
-	// Check if the file already exists.
-	/*
-		if _, err := os.Stat(outputPath); err == nil {
-			log.Printf("File already exists: %s", outputPath)
-			sendErrorResponse(conn, "File already exists")
-			return
+	// Handle file conflicts using the specified strategy.
+	finalPath, err := handleFileConflict(outputPath, receivedFileName, *fileStrategy)
+	if err != nil {
+		if strings.Contains(err.Error(), "skip strategy is enabled") {
+			log.Printf("Skipping file from %s: %v", clientAddr, err)
+			sendErrorResponse(conn, "File already exists and skip strategy is enabled")
+		} else {
+			log.Printf("Failed to handle file conflict for %s: %v", clientAddr, err)
+			sendErrorResponse(conn, fmt.Sprintf("Failed to handle file conflict: %v", err))
 		}
-	*/
+		return
+	}
 
 	// Create the output file.
-	outputFile, err := os.Create(outputPath)
+	outputFile, err := os.Create(finalPath)
 	if err != nil {
-		log.Printf("Failed to create output file %s for client %s: %v", outputPath, clientAddr, err)
+		log.Printf("Failed to create output file %s for client %s: %v", finalPath, clientAddr, err)
 		sendErrorResponse(conn, "Failed to create output file")
 		return
 	}
@@ -175,7 +238,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 	// Close the output file when the surrounding function exits.
 	defer func() {
 		if err := outputFile.Close(); err != nil {
-			log.Printf("Error closing output file %s: %v", outputPath, err)
+			log.Printf("Error closing output file %s: %v", finalPath, err)
 		}
 	}()
 
@@ -205,8 +268,8 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		sendErrorResponse(conn, "Failed to receive file content")
 
 		// Clean up the incomplete file.
-		if err := os.Remove(outputPath); err != nil {
-			log.Printf("Failed to remove partial file %s: %v", outputPath, err)
+		if err := os.Remove(finalPath); err != nil {
+			log.Printf("Failed to remove partial file %s: %v", finalPath, err)
 		}
 		return
 	}
@@ -220,15 +283,15 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 			clientAddr, header.FileSize, bytesWritten)
 		sendErrorResponse(conn, "File size mismatch")
 		// Clean up the incomplete file.
-		if err := os.Remove(outputPath); err != nil {
-			log.Printf("Failed to remove incomplete file %s: %v", outputPath, err)
+		if err := os.Remove(finalPath); err != nil {
+			log.Printf("Failed to remove incomplete file %s: %v", finalPath, err)
 		}
 		return
 	}
 
 	// Send the success response to the client.
 	successMsg := fmt.Sprintf("SUCCESS: File received successfully! %d bytes written to %s\n",
-		bytesWritten, outputPath)
+		bytesWritten, finalPath)
 	if _, err := conn.Write([]byte(successMsg)); err != nil {
 		log.Printf("Failed to send success response to client %s: %v", clientAddr, err)
 	}
@@ -236,7 +299,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 	transferDuration := time.Since(startTime)
 	transferRate := float64(bytesWritten) / transferDuration.Seconds() / 1024 / 1024 // MB/s.
 	log.Printf("File transfer completed from %s: %d bytes written to %s (duration: %v, rate: %.2f MB/s)",
-		clientAddr, bytesWritten, outputPath, transferDuration, transferRate)
+		clientAddr, bytesWritten, finalPath, transferDuration, transferRate)
 }
 
 // Function to read from the connection with context support.
@@ -260,6 +323,15 @@ func (cr *contextReader) Read(p []byte) (n int, err error) {
 func main() {
 	// Parse command-line flags.
 	flag.Parse()
+
+	// Validate the file strategy flag.
+	switch *fileStrategy {
+	case StrategyOverwrite, StrategyRename, StrategySkip:
+		// Do nothing.
+	default:
+		log.Fatalf("Invalid file strategy: %s. Must be one of: %s, %s, %s",
+			*fileStrategy, StrategyOverwrite, StrategyRename, StrategySkip)
+	}
 
 	// Setup structured logging.
 	setupLogging()
@@ -326,7 +398,7 @@ func main() {
 		}()
 		select {
 		case <-doneChannel:
-			log.Printf("All active transfers completed successfully")
+			log.Printf("All active transfers completed successfully.")
 		case <-time.After(ShutdownTimeout):
 			log.Printf("Shutdown timeout reached. Forcing shutdown...")
 		}

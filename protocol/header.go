@@ -19,7 +19,7 @@ var (
 	ErrInvalidHeaderSize = errors.New("invalid header size")
 	ErrInvalidFileSize   = errors.New("invalid file size in header")
 	ErrInvalidFilename   = errors.New("invalid filename in header")
-	ErrHeaderTooLarge    = errors.New("header size exceeds the maximum allowed size")
+	ErrHeaderTooLarge    = errors.New("header size exceeds maximum allowed size")
 )
 
 // Struct to represent the file transfer header.
@@ -39,7 +39,7 @@ func validateHeader(header *Header) error {
 	}
 
 	if len(header.Filename) > FilenameSize {
-		return fmt.Errorf("%w: filename length %d exceeds the maximum %d",
+		return fmt.Errorf("%w: filename length %d exceeds maximum %d",
 			ErrInvalidFilename, len(header.Filename), FilenameSize)
 	}
 
