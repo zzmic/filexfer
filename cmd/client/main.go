@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"filexfer/protocol"
 	"flag"
@@ -9,8 +10,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -23,10 +27,14 @@ var (
 	ErrConnectionFailed = errors.New("connection failed")
 )
 
-// Constants to constrain the maximum file size and log prefix.
+// Constants to constrain the maximum file size, log prefix, and timeouts.
 const (
-	MaxFileSize = 100 * 1024 * 1024 // 100MB limit.
-	LogPrefix   = "[CLIENT]"        // Log prefix.
+	MaxFileSize       = 100 * 1024 * 1024 // 100MB limit.
+	LogPrefix         = "[CLIENT]"        // Log prefix.
+	ConnectionTimeout = 30 * time.Second  // Connection timeout.
+	ReadTimeout       = 30 * time.Second  // Read timeout.
+	WriteTimeout      = 30 * time.Second  // Write timeout.
+	ShutdownTimeout   = 30 * time.Second  // Shutdown timeout.
 )
 
 // Command-line flags for the client.
@@ -88,7 +96,7 @@ func validateFile(filePath string) error {
 // Function to read and process the server's response.
 func readServerResponse(conn net.Conn) error {
 	// Set a short timeout for reading the response.
-	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
 		return fmt.Errorf("failed to set read deadline: %w", err)
 	}
 
@@ -117,6 +125,30 @@ func readServerResponse(conn net.Conn) error {
 	return nil
 }
 
+// Struct to wrap a net.Conn to support context cancellation and coordination of the transfer with shutdown.
+type contextWriter struct {
+	ctx  context.Context
+	conn net.Conn
+}
+
+// Function to write to the connection with context support.
+func (cw *contextWriter) Write(p []byte) (n int, err error) {
+	// Check if context is cancelled before writing.
+	select {
+	case <-cw.ctx.Done():
+		return 0, cw.ctx.Err()
+	default:
+		// Do nothing.
+	}
+
+	// Set write deadline for this write operation.
+	if err := cw.conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
+		return 0, err
+	}
+
+	return cw.conn.Write(p)
+}
+
 func main() {
 	// Parse command-line flags.
 	flag.Parse()
@@ -136,14 +168,29 @@ func main() {
 		log.Fatalf("File validation failed: %v", err)
 	}
 
+	// Create context for graceful shutdown.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Set up signal handling for graceful shutdown.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Handle shutdown signals.
+	go func() {
+		sig := <-sigChan
+		log.Printf("Shutdown signal received: %v. Starting graceful shutdown...", sig)
+		cancel()
+	}()
+
 	log.Printf("Connecting to the server at %s...", *serverAddr)
 
 	// Establish a TCP connection to the server using the server's address.
 	// `conn`: a network connection object that represents the connection to the server.
 	// `net.DialTimeout`: a function to connect to the address on the named network.
 	// `ServerAddr`: the address of the server to connect to.
-	// `30*time.Second`: the timeout for the connection.
-	conn, err := net.DialTimeout("tcp", *serverAddr, 30*time.Second)
+	// `ConnectionTimeout`: the timeout for the connection.
+	conn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
 	if err != nil {
 		log.Fatalf("Failed to establish TCP connection to the server: %v", err)
 	}
@@ -186,9 +233,12 @@ func main() {
 	// Log transfer start.
 	fmt.Printf("Starting file transfer: %s (%d bytes)\n", header.Filename, header.FileSize)
 
-	// Set connection deadline for the entire transfer.
-	if err := conn.SetDeadline(time.Now().Add(10 * time.Minute)); err != nil {
-		log.Fatalf("Failed to set connection deadline: %v", err)
+	// Set connection timeouts.
+	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
+		log.Fatalf("Failed to set read deadline: %v", err)
+	}
+	if err := conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
+		log.Fatalf("Failed to set write deadline: %v", err)
 	}
 
 	// Send the header first.
@@ -201,17 +251,54 @@ func main() {
 	// Send the file content with progress tracking.
 	startTime := time.Now()
 
-	// Create a progress writer to track download progress.
+	// Create a progress reader to track upload progress.
 	progressReader := protocol.NewProgressReader(file, int64(header.FileSize), "Uploading")
 
-	// Send the file content with progress tracking.
-	bytesWritten, err := io.Copy(conn, progressReader)
-	if err != nil {
-		log.Fatalf("Failed to send file content: %v", err)
+	// Create a context-aware writer that can be interrupted during shutdown.
+	ctxWriter := &contextWriter{
+		ctx:  ctx,
+		conn: conn,
+	}
+
+	// Use a WaitGroup to coordinate the transfer with shutdown.
+	var transferWaitGroup sync.WaitGroup
+	transferWaitGroup.Add(1)
+
+	var bytesWritten int64
+	var transferErr error
+
+	go func() {
+		defer transferWaitGroup.Done()
+		bytesWritten, transferErr = io.Copy(ctxWriter, progressReader)
+	}()
+
+	// Wait for transfer to complete or context to be cancelled.
+	transferDone := make(chan struct{})
+	go func() {
+		transferWaitGroup.Wait()
+		close(transferDone)
+	}()
+
+	select {
+	case <-transferDone:
+		// Transfer completed.
+	case <-ctx.Done():
+		log.Printf("Transfer interrupted due to shutdown signal")
+		// Wait for a while for the transfer to finish gracefully.
+		select {
+		case <-transferDone:
+			log.Printf("Transfer completed after shutdown signal")
+		case <-time.After(ShutdownTimeout):
+			log.Printf("Transfer did not complete within shutdown timeout")
+		}
 	}
 
 	// Mark transfer as complete and show final statistics.
 	progressReader.Complete()
+
+	if transferErr != nil {
+		log.Fatalf("Failed to send file content: %v", transferErr)
+	}
 
 	// Verify if the bytes written are equal to the file size.
 	if bytesWritten != int64(header.FileSize) {

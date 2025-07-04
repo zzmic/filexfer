@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"filexfer/protocol"
 	"flag"
@@ -23,10 +24,13 @@ var (
 	ErrFileTooLarge    = errors.New("file size exceeds maximum allowed size")
 )
 
-// Constants to constrain the maximum file size and log prefix.
+// Constants to constrain the maximum file size, log prefix, and timeouts.
 const (
-	MaxFileSize = 100 * 1024 * 1024 // 100MB limit.
-	LogPrefix   = "[SERVER]"        // Log prefix.
+	MaxFileSize     = 100 * 1024 * 1024 // 100MB limit.
+	LogPrefix       = "[SERVER]"        // Log prefix.
+	ReadTimeout     = 30 * time.Second  // Read timeout.
+	WriteTimeout    = 30 * time.Second  // Write timeout.
+	ShutdownTimeout = 30 * time.Second  // Shutdown timeout.
 )
 
 // Command-line flags.
@@ -76,8 +80,14 @@ func sendErrorResponse(conn net.Conn, message string) {
 	}
 }
 
-// Function to handle a client connection.
-func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
+// Struct to wrap a net.Conn to support context cancellation and coordination of the transfer with shutdown.
+type contextReader struct {
+	ctx  context.Context
+	conn net.Conn
+}
+
+// Function to handle a client connection with context support for graceful shutdown.
+func handleConnection(ctx context.Context, conn net.Conn, waitGroup *sync.WaitGroup) {
 	// Get the start time and the client address of the connection.
 	startTime := time.Now()
 	clientAddr := conn.RemoteAddr().String()
@@ -95,9 +105,14 @@ func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
 
 	log.Printf("New connection established from %s", clientAddr)
 
-	// Set connection deadline to prevent hanging connections.
-	if err := conn.SetDeadline(time.Now().Add(5 * time.Minute)); err != nil {
-		log.Printf("Failed to set connection deadline for %s: %v", clientAddr, err)
+	// Set connection timeouts to prevent hanging connections.
+	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
+		log.Printf("Failed to set read deadline for %s: %v", clientAddr, err)
+		sendErrorResponse(conn, "Internal server error")
+		return
+	}
+	if err := conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
+		log.Printf("Failed to set write deadline for %s: %v", clientAddr, err)
 		sendErrorResponse(conn, "Internal server error")
 		return
 	}
@@ -139,7 +154,7 @@ func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
 	receivedFileName := "received_" + header.Filename
 	outputPath := filepath.Join(*destDir, receivedFileName)
 
-	// Note: Uncomment this if we want to prevent overwriting existing files.
+	// NOTE: Uncomment this if we want to prevent overwriting existing files.
 	// Check if the file already exists.
 	/*
 		if _, err := os.Stat(outputPath); err == nil {
@@ -168,7 +183,13 @@ func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
 	// Create a progress writer to track download progress.
 	progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Receiving %s", header.Filename))
 
-	bytesWritten, err := io.CopyN(progressWriter, conn, int64(header.FileSize))
+	// Create a context-aware reader that can be interrupted during shutdown.
+	ctxReader := &contextReader{
+		ctx:  ctx,
+		conn: conn,
+	}
+
+	bytesWritten, err := io.CopyN(progressWriter, ctxReader, int64(header.FileSize))
 	if err != nil {
 		log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
 		if errors.Is(err, io.EOF) {
@@ -176,6 +197,9 @@ func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) {
 			log.Printf("Client %s sent incomplete file data", clientAddr)
+		}
+		if ctx.Err() != nil {
+			log.Printf("Transfer interrupted due to server shutdown: %v", ctx.Err())
 		}
 		// Fallback to a generic message.
 		sendErrorResponse(conn, "Failed to receive file content")
@@ -215,6 +239,24 @@ func handleConnection(conn net.Conn, waitGroup *sync.WaitGroup) {
 		clientAddr, bytesWritten, outputPath, transferDuration, transferRate)
 }
 
+// Function to read from the connection with context support.
+func (cr *contextReader) Read(p []byte) (n int, err error) {
+	// Check if context is cancelled before reading.
+	select {
+	case <-cr.ctx.Done():
+		return 0, cr.ctx.Err()
+	default:
+		// Do nothing.
+	}
+
+	// Set read deadline for this read operation.
+	if err := cr.conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
+		return 0, err
+	}
+
+	return cr.conn.Read(p)
+}
+
 func main() {
 	// Parse command-line flags.
 	flag.Parse()
@@ -223,6 +265,10 @@ func main() {
 	setupLogging()
 
 	log.Printf("Starting file transfer server...")
+
+	// Create context for graceful shutdown.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Establish a listener on the specified port and listen for incoming connections.
 	listener, err := net.Listen("tcp", ":"+*listenPort)
@@ -258,13 +304,32 @@ func main() {
 		// Receive a signal from the channel.
 		// Block until a signal is received on the channel.
 		sig := <-receiveSigChannel
-		log.Printf("Shutdown signal received: %v. Closing listener...", sig)
+		log.Printf("Shutdown signal received: %v. Starting graceful shutdown...", sig)
+
+		// Cancel the context to signal all active transfers to stop.
+		cancel()
+
 		// Close the listener (stop accepting new connections).
 		if err := listener.Close(); err != nil {
 			log.Printf("Error closing listener during shutdown: %v", err)
 		}
+
 		// Close the shutdown channel to signal the main loop to stop accepting new connections.
 		close(shutdownChannel)
+
+		// Wait for active transfers with timeout.
+		log.Printf("Waiting for active transfers to complete (timeout: %v)...", ShutdownTimeout)
+		doneChannel := make(chan struct{})
+		go func() {
+			waitGroup.Wait()
+			close(doneChannel)
+		}()
+		select {
+		case <-doneChannel:
+			log.Printf("All active transfers completed successfully")
+		case <-time.After(ShutdownTimeout):
+			log.Printf("Shutdown timeout reached. Forcing shutdown...")
+		}
 	}()
 
 	// Accept incoming connections in an infinite loop.
@@ -288,6 +353,6 @@ func main() {
 		// Increment the `sync.WaitGroup` counter by 1 to indicate that a new client connection (handled in a new goroutine) has started,
 		// so the server will wait for this connection to finish before shutting down.
 		waitGroup.Add(1)
-		go handleConnection(conn, &waitGroup) // Handle the connection.
+		go handleConnection(ctx, conn, &waitGroup)
 	}
 }
