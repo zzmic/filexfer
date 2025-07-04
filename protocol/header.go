@@ -8,12 +8,10 @@ import (
 	"strings"
 )
 
+// Constants to represent the header size and the maximum file name size.
 const (
-	// `HeaderSize` represents the total size of the header in bytes.
-	// `8` bytes for file size + `256` bytes for file name.
-	HeaderSize = 8 + 256
-	// `FilenameSize` represents the maximum size of the file name in bytes.
-	FilenameSize = 256
+	HeaderSize   = 8 + 256 // 264 bytes for the header (8 bytes for file size + 256 bytes for file name).
+	FilenameSize = 256     // 256 bytes for the file name.
 )
 
 // Custom error types for protocol errors.
@@ -24,13 +22,13 @@ var (
 	ErrHeaderTooLarge    = errors.New("header size exceeds the maximum allowed size")
 )
 
-// `Header` represents the file transfer header.
+// Struct to represent the file transfer header.
 type Header struct {
 	FileSize uint64
 	Filename string
 }
 
-// validateHeader performs validation of header data
+// Function to validate the header data.
 func validateHeader(header *Header) error {
 	if header == nil {
 		return fmt.Errorf("header is nil")
@@ -66,10 +64,11 @@ func WriteHeader(w io.Writer, header *Header) error {
 		return fmt.Errorf("invalid header for writing: %w", err)
 	}
 
-	// Write the file size as 8 bytes in big-endian format.
+	// Write the file size as 8 bytes in the big-endian format.
 	sizeBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(sizeBytes, header.FileSize)
 
+	// Write the file size to the writer.
 	n, err := w.Write(sizeBytes)
 	if err != nil {
 		return fmt.Errorf("failed to write file size: %w", err)
@@ -78,10 +77,11 @@ func WriteHeader(w io.Writer, header *Header) error {
 		return fmt.Errorf("incomplete write of file size: wrote %d bytes, expected 8", n)
 	}
 
-	// Write the file name as fixed-size bytes (pad with zeros if shorter).
+	// Write the file name as fixed-size bytes (pad with zeros if shorter than the maximum file name size).
 	filenameBytes := make([]byte, FilenameSize)
 	copy(filenameBytes, []byte(header.Filename))
 
+	// Write the file name to the writer.
 	n, err = w.Write(filenameBytes)
 	if err != nil {
 		return fmt.Errorf("failed to write filename: %w", err)
@@ -101,7 +101,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 
 	// Read the entire header into a buffer (in bytes).
 	headerBytes := make([]byte, HeaderSize)
-
+	// Read the header from the reader.
 	n, err := io.ReadFull(r, headerBytes)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -133,7 +133,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 		}
 	}
 
-	// If no null byte found, use the entire file name field
+	// If no null byte found, use the entire file name field.
 	if filename == "" {
 		filename = string(filenameBytes)
 	}

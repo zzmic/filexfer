@@ -97,7 +97,7 @@ func validateFile(filePath string) error {
 func readServerResponse(conn net.Conn) error {
 	// Set a short timeout for reading the response.
 	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
-		return fmt.Errorf("failed to set read deadline: %w", err)
+		return fmt.Errorf("failed to set a read deadline: %w", err)
 	}
 
 	// Read the response from the server.
@@ -141,7 +141,7 @@ func (cw *contextWriter) Write(p []byte) (n int, err error) {
 		// Do nothing.
 	}
 
-	// Set write deadline for this write operation.
+	// Set a write deadline for this write operation.
 	if err := cw.conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
 		return 0, err
 	}
@@ -235,10 +235,10 @@ func main() {
 
 	// Set connection timeouts.
 	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
-		log.Fatalf("Failed to set read deadline: %v", err)
+		log.Fatalf("Failed to set a read deadline: %v", err)
 	}
 	if err := conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
-		log.Fatalf("Failed to set write deadline: %v", err)
+		log.Fatalf("Failed to set a write deadline: %v", err)
 	}
 
 	// Send the header first.
@@ -261,39 +261,39 @@ func main() {
 	}
 
 	// Use a WaitGroup to coordinate the transfer with shutdown.
-	var transferWaitGroup sync.WaitGroup
-	transferWaitGroup.Add(1)
+	var transferWg sync.WaitGroup
+	transferWg.Add(1)
 
 	var bytesWritten int64
 	var transferErr error
 
 	go func() {
-		defer transferWaitGroup.Done()
+		defer transferWg.Done()
 		bytesWritten, transferErr = io.Copy(ctxWriter, progressReader)
 	}()
 
-	// Wait for transfer to complete or context to be cancelled.
-	transferDone := make(chan struct{})
+	// Wait for the transfer to complete or the context to be cancelled.
+	transferDoneChan := make(chan struct{})
 	go func() {
-		transferWaitGroup.Wait()
-		close(transferDone)
+		transferWg.Wait()
+		close(transferDoneChan)
 	}()
 
 	select {
-	case <-transferDone:
+	case <-transferDoneChan:
 		// Transfer completed.
 	case <-ctx.Done():
 		log.Printf("Transfer interrupted due to shutdown signal")
 		// Wait for a while for the transfer to finish gracefully.
 		select {
-		case <-transferDone:
+		case <-transferDoneChan:
 			log.Printf("Transfer completed after shutdown signal")
 		case <-time.After(ShutdownTimeout):
 			log.Printf("Transfer did not complete within shutdown timeout")
 		}
 	}
 
-	// Mark transfer as complete and show final statistics.
+	// Mark transfer as complete and log the final statistics.
 	progressReader.Complete()
 
 	if transferErr != nil {
@@ -311,7 +311,6 @@ func main() {
 		log.Fatalf("Failed to read server response: %v", err)
 	}
 
-	// Calculate and log the transfer duration and rate.
 	transferDuration := time.Since(startTime)
 	transferRate := float64(bytesWritten) / transferDuration.Seconds() / 1024 / 1024 // MB/s.
 	log.Printf("File sent successfully! %d bytes sent in %v (%.2f MB/s)",
