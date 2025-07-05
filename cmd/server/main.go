@@ -242,9 +242,11 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		}
 	}()
 
-	// Read and write the file content with progress tracking.
-	// Create a progress writer to track download progress.
-	progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Receiving %s", header.Filename))
+	// Read the file content into a buffer for verification.
+	log.Printf("Receiving file content from %s...", clientAddr)
+
+	// Create a buffer to hold the entire file content for verification.
+	fileBuffer := make([]byte, header.FileSize)
 
 	// Create a context-aware reader that can be interrupted during shutdown.
 	ctxReader := &contextReader{
@@ -252,7 +254,36 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		conn: conn,
 	}
 
-	bytesWritten, err := io.CopyN(progressWriter, ctxReader, int64(header.FileSize))
+	// Read the entire file content into the buffer.
+	_, err = io.ReadFull(ctxReader, fileBuffer)
+	if err != nil {
+		log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
+		if errors.Is(err, io.EOF) {
+			log.Printf("Client %s disconnected during file transfer", clientAddr)
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			log.Printf("Client %s sent incomplete file data", clientAddr)
+		}
+		if ctx.Err() != nil {
+			log.Printf("Transfer interrupted due to server shutdown: %v", ctx.Err())
+		}
+		// Fallback to a generic message.
+		sendErrorResponse(conn, "Failed to receive file content")
+		return
+	}
+
+	// Verify the data checksum before writing to disk.
+	log.Printf("Verifying received data integrity...")
+	if err := protocol.VerifyDataChecksum(fileBuffer, header.Checksum); err != nil {
+		log.Printf("Data checksum verification failed for client %s: %v", clientAddr, err)
+		sendErrorResponse(conn, "Data integrity check failed")
+		return
+	}
+	log.Printf("Data checksum verification successful")
+
+	// Write the verified buffer to disk with progress tracking.
+	progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Writing %s", header.Filename))
+	bytesWritten, err := progressWriter.Write(fileBuffer)
 	if err != nil {
 		log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
 		if errors.Is(err, io.EOF) {
@@ -278,9 +309,9 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 	progressWriter.Complete()
 
 	// Verify if the bytes written are equal to the file size.
-	if bytesWritten != int64(header.FileSize) {
+	if bytesWritten != len(fileBuffer) {
 		log.Printf("File size mismatch for client %s: expected %d, received %d",
-			clientAddr, header.FileSize, bytesWritten)
+			clientAddr, len(fileBuffer), bytesWritten)
 		sendErrorResponse(conn, "File size mismatch")
 		// Clean up the incomplete file.
 		if err := os.Remove(finalPath); err != nil {
@@ -288,6 +319,9 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		}
 		return
 	}
+
+	// File data integrity verified successfully.
+	log.Printf("File integrity verified for %s", header.Filename)
 
 	// Send the success response to the client.
 	successMsg := fmt.Sprintf("SUCCESS: File received successfully! %d bytes written to %s\n",

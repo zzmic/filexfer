@@ -10,8 +10,9 @@ import (
 
 // Constants to represent the header size and the maximum file name size.
 const (
-	HeaderSize   = 8 + 256 // 264 bytes for the header (8 bytes for file size + 256 bytes for file name).
-	FilenameSize = 256     // 256 bytes for the file name.
+	HeaderSize   = 8 + 256 + 32 // 328 bytes for the header (8 bytes for file size + 256 bytes for file name + 32 bytes for SHA256 checksum).
+	FilenameSize = 256          // 256 bytes for the file name.
+	ChecksumSize = 32           // 32 bytes for SHA256 checksum (hexadecimal representation in string).
 )
 
 // Custom error types for protocol errors.
@@ -20,12 +21,15 @@ var (
 	ErrInvalidFileSize   = errors.New("invalid file size in header")
 	ErrInvalidFilename   = errors.New("invalid filename in header")
 	ErrHeaderTooLarge    = errors.New("header size exceeds maximum allowed size")
+	ErrInvalidChecksum   = errors.New("invalid checksum in header")
+	ErrChecksumMismatch  = errors.New("checksum mismatch")
 )
 
 // Struct to represent the file transfer header.
 type Header struct {
 	FileSize uint64
 	Filename string
+	Checksum []byte
 }
 
 // Function to validate the header data.
@@ -49,6 +53,15 @@ func validateHeader(header *Header) error {
 
 	if header.FileSize == 0 {
 		return fmt.Errorf("%w: file size cannot be zero", ErrInvalidFileSize)
+	}
+
+	if header.Checksum == nil {
+		return fmt.Errorf("%w: checksum cannot be nil", ErrInvalidChecksum)
+	}
+
+	if len(header.Checksum) != ChecksumSize {
+		return fmt.Errorf("%w: checksum length %d is invalid, expected %d",
+			ErrInvalidChecksum, len(header.Checksum), ChecksumSize)
 	}
 
 	return nil
@@ -90,6 +103,19 @@ func WriteHeader(w io.Writer, header *Header) error {
 		return fmt.Errorf("incomplete write of filename: wrote %d bytes, expected %d", n, FilenameSize)
 	}
 
+	// Write the checksum as fixed-size bytes.
+	checksumBytes := make([]byte, ChecksumSize)
+	copy(checksumBytes, header.Checksum)
+
+	// Write the checksum to the writer.
+	n, err = w.Write(checksumBytes)
+	if err != nil {
+		return fmt.Errorf("failed to write checksum: %w", err)
+	}
+	if n != ChecksumSize {
+		return fmt.Errorf("incomplete write of checksum: wrote %d bytes, expected %d", n, ChecksumSize)
+	}
+
 	return nil
 }
 
@@ -122,7 +148,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 
 	// Extract the file name (next 256 bytes, trim null bytes).
 	// The file name is stored in the next 256 bytes of the header.
-	filenameBytes := headerBytes[8:]
+	filenameBytes := headerBytes[8 : 8+FilenameSize]
 
 	// Find the first null byte and trim from there.
 	filename := ""
@@ -138,10 +164,14 @@ func ReadHeader(r io.Reader) (*Header, error) {
 		filename = string(filenameBytes)
 	}
 
+	// Extract the checksum (next 32 bytes, trim null bytes).
+	checksumBytes := headerBytes[8+FilenameSize : 8+FilenameSize+ChecksumSize]
+
 	// Create and validate the header.
 	header := &Header{
 		FileSize: fileSize,
 		Filename: filename,
+		Checksum: checksumBytes,
 	}
 	if err := validateHeader(header); err != nil {
 		return nil, fmt.Errorf("invalid header read from stream: %w", err)

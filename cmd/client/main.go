@@ -224,10 +224,24 @@ func main() {
 		log.Fatalf("Failed to get file information for %s: %v", *filePath, err)
 	}
 
+	// Calculate the file checksum.
+	fmt.Printf("Calculating file checksum...\n")
+	checksum, err := protocol.CalculateFileChecksum(file)
+	if err != nil {
+		log.Fatalf("Failed to calculate file checksum: %v", err)
+	}
+	fmt.Printf("File checksum: %x\n", checksum)
+
+	// Reset the file position to the beginning for the transfer (otherwise the file will be read from the current, EOF, position).
+	if _, err := file.Seek(0, 0); err != nil {
+		log.Fatalf("Failed to reset file position: %v", err)
+	}
+
 	// Create the header.
 	header := &protocol.Header{
 		FileSize: uint64(fileInfo.Size()),
 		Filename: filepath.Base(*filePath),
+		Checksum: checksum,
 	}
 
 	// Log transfer start.
