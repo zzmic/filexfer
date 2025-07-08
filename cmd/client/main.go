@@ -40,7 +40,7 @@ const (
 // Command-line flags for the client.
 var (
 	serverAddr = flag.String("server", "localhost:8080", "Server address (IP:Port)")
-	filePath   = flag.String("file", "", "File to be transferred (required)")
+	filePath   = flag.String("file", "", "File or directory to be transferred (required)")
 )
 
 // Function to configure structured logging with timestamps and custom prefix.
@@ -58,36 +58,35 @@ func validateArgs() error {
 	return nil
 }
 
-// Function to perform comprehensive validation of the file to be sent.
-func validateFile(filePath string) error {
-	if filePath == "" {
-		return fmt.Errorf("%w: file path cannot be empty", ErrInvalidFilename)
+// Function to perform comprehensive validation of the file or directory to be sent.
+func validatePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("%w: path cannot be empty", ErrInvalidFilename)
 	}
 
-	fileInfo, err := os.Stat(filePath)
+	fileInfo, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("%w: %s", ErrFileNotFound, filePath)
+			return fmt.Errorf("%w: %s", ErrFileNotFound, path)
 		}
-		return fmt.Errorf("failed to get file information for %s: %w", filePath, err)
+		return fmt.Errorf("failed to get path information for %s: %w", path, err)
 	}
 
-	if fileInfo.IsDir() {
-		return fmt.Errorf("path is a directory, not a file: %s", filePath)
-	}
+	// For files, perform additional validation.
+	if !fileInfo.IsDir() {
+		if fileInfo.Size() == 0 {
+			return fmt.Errorf("%w: %s", ErrFileEmpty, path)
+		}
 
-	if fileInfo.Size() == 0 {
-		return fmt.Errorf("%w: %s", ErrFileEmpty, filePath)
-	}
+		if fileInfo.Size() > MaxFileSize {
+			return fmt.Errorf("%w: file size %d exceeds maximum allowed size %d",
+				ErrFileTooLarge, fileInfo.Size(), MaxFileSize)
+		}
 
-	if fileInfo.Size() > MaxFileSize {
-		return fmt.Errorf("%w: file size %d exceeds maximum allowed size %d",
-			ErrFileTooLarge, fileInfo.Size(), MaxFileSize)
-	}
-
-	filename := filepath.Base(filePath)
-	if filepath.Base(filename) != filename {
-		return fmt.Errorf("invalid filename: contains path separators: %s", filename)
+		filename := filepath.Base(path)
+		if filepath.Base(filename) != filename {
+			return fmt.Errorf("invalid filename: contains path separators: %s", filename)
+		}
 	}
 
 	return nil
@@ -163,9 +162,24 @@ func main() {
 		log.Fatalf("Invalid command-line arguments: %v", err)
 	}
 
-	// Validate the file before attempting to connect.
-	if err := validateFile(*filePath); err != nil {
-		log.Fatalf("File validation failed: %v", err)
+	// Validate the path before attempting to connect.
+	if err := validatePath(*filePath); err != nil {
+		log.Fatalf("Path validation failed: %v", err)
+	}
+
+	// Check if the path is a directory or file.
+	fileInfo, err := os.Stat(*filePath)
+	if err != nil {
+		log.Fatalf("Failed to get path information: %v", err)
+	}
+
+	isDirectory := fileInfo.IsDir()
+
+	// Log the transfer type.
+	if isDirectory {
+		log.Printf("Preparing directory transfer: %s", *filePath)
+	} else {
+		log.Printf("Preparing file transfer: %s", *filePath)
 	}
 
 	// Create context for graceful shutdown.
@@ -186,10 +200,6 @@ func main() {
 	log.Printf("Connecting to the server at %s...", *serverAddr)
 
 	// Establish a TCP connection to the server using the server's address.
-	// `conn`: a network connection object that represents the connection to the server.
-	// `net.DialTimeout`: a function to connect to the address on the named network.
-	// `ServerAddr`: the address of the server to connect to.
-	// `ConnectionTimeout`: the timeout for the connection.
 	conn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
 	if err != nil {
 		log.Fatalf("Failed to establish TCP connection to the server: %v", err)
@@ -205,48 +215,6 @@ func main() {
 
 	log.Printf("Connected successfully to the server at %s", *serverAddr)
 
-	// Open the file to send.
-	file, err := os.Open(*filePath)
-	if err != nil {
-		log.Fatalf("Failed to open file %s: %v", *filePath, err)
-	}
-
-	// Close the file when the surrounding function exits.
-	defer func() {
-		if err := file.Close(); err != nil {
-			log.Printf("Error closing file %s: %v", *filePath, err)
-		}
-	}()
-
-	// Get the file information.
-	fileInfo, err := file.Stat()
-	if err != nil {
-		log.Fatalf("Failed to get file information for %s: %v", *filePath, err)
-	}
-
-	// Calculate the file checksum.
-	fmt.Printf("Calculating file checksum...\n")
-	checksum, err := protocol.CalculateFileChecksum(file)
-	if err != nil {
-		log.Fatalf("Failed to calculate file checksum: %v", err)
-	}
-	fmt.Printf("File checksum: %x\n", checksum)
-
-	// Reset the file position to the beginning for the transfer (otherwise the file will be read from the current, EOF, position).
-	if _, err := file.Seek(0, 0); err != nil {
-		log.Fatalf("Failed to reset file position: %v", err)
-	}
-
-	// Create the header.
-	header := &protocol.Header{
-		FileSize: uint64(fileInfo.Size()),
-		Filename: filepath.Base(*filePath),
-		Checksum: checksum,
-	}
-
-	// Log transfer start.
-	fmt.Printf("Starting file transfer: %s (%d bytes)\n", header.Filename, header.FileSize)
-
 	// Set connection timeouts.
 	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
 		log.Fatalf("Failed to set read deadline: %v", err)
@@ -255,10 +223,79 @@ func main() {
 		log.Fatalf("Failed to set write deadline: %v", err)
 	}
 
+	if isDirectory {
+		// Handle directory transfer.
+		if err := transferDirectory(ctx, *filePath); err != nil {
+			log.Fatalf("Directory transfer failed: %v", err)
+		}
+	} else {
+		// Handle single file transfer.
+		if err := transferFile(ctx, conn, *filePath); err != nil {
+			log.Fatalf("File transfer failed: %v", err)
+		}
+	}
+
+	log.Printf("Client shutting down.")
+}
+
+// Function to transfer a single file.
+func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath ...string) error {
+	// Open the file to send.
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %v", filePath, err)
+	}
+
+	// Close the file when the surrounding function exits.
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("Error closing file %s: %v", filePath, err)
+		}
+	}()
+
+	// Get the file information.
+	statInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to get file information for %s: %v", filePath, err)
+	}
+
+	// Calculate the file checksum.
+	fmt.Printf("Calculating file checksum...\n")
+	checksum, err := protocol.CalculateFileChecksum(file)
+	if err != nil {
+		return fmt.Errorf("failed to calculate file checksum: %v", err)
+	}
+	fmt.Printf("File checksum: %x\n", checksum)
+
+	// Reset the file position to the beginning for the transfer.
+	if _, err := file.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to reset file position: %v", err)
+	}
+
+	// Determine the file name to use in the header.
+	fileName := filepath.Base(filePath)
+	// If there exists at least one relative path, meaning that the file is a subfile of a directory,
+	// use the relative path instead of the file name.
+	if len(relPath) > 0 {
+		fileName = relPath[0]
+	}
+
+	// Create the header.
+	header := &protocol.Header{
+		FileSize:      uint64(statInfo.Size()),
+		FileName:      fileName,
+		Checksum:      checksum,
+		TransferType:  protocol.TransferTypeFile,
+		DirectoryPath: "",
+	}
+
+	// Log transfer start.
+	fmt.Printf("Starting file transfer: %s (%d bytes)\n", header.FileName, header.FileSize)
+
 	// Send the header first.
 	fmt.Printf("Sending file header...\n")
 	if err := protocol.WriteHeader(conn, header); err != nil {
-		log.Fatalf("Failed to send file transfer header: %v", err)
+		return fmt.Errorf("failed to send file transfer header: %v", err)
 	}
 	fmt.Printf("Header sent successfully. Starting file transfer...\n")
 
@@ -311,18 +348,18 @@ func main() {
 	progressReader.Complete()
 
 	if transferErr != nil {
-		log.Fatalf("Failed to send file content: %v", transferErr)
+		return fmt.Errorf("failed to send file content: %v", transferErr)
 	}
 
 	// Verify if the bytes written are equal to the file size.
 	if bytesWritten != int64(header.FileSize) {
-		log.Fatalf("File transfer incomplete: expected %d bytes, sent %d bytes",
+		return fmt.Errorf("file transfer incomplete: expected %d bytes, sent %d bytes",
 			header.FileSize, bytesWritten)
 	}
 
 	// Read the server response.
 	if err := readServerResponse(conn); err != nil {
-		log.Fatalf("Failed to read server response: %v", err)
+		return fmt.Errorf("failed to read server response: %v", err)
 	}
 
 	transferDuration := time.Since(startTime)
@@ -330,5 +367,68 @@ func main() {
 	log.Printf("File sent successfully! %d bytes sent in %v (%.2f MB/s)",
 		bytesWritten, transferDuration, transferRate)
 
-	log.Printf("Client shutting down.")
+	return nil
+}
+
+// Function to transfer a directory.
+func transferDirectory(ctx context.Context, dirPath string) error {
+	// Create a list of all files to transfer, including subdirectories.
+	var allFiles []string
+	// Walk the directory and add all files to the list.
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			allFiles = append(allFiles, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to walk directory %s: %v", dirPath, err)
+	}
+
+	log.Printf("Found %d files to transfer in directory %s", len(allFiles), dirPath)
+
+	// Transfer each file individually using separate connections.
+	for _, filePath := range allFiles {
+		// Create a new connection for each file to avoid protocol issues.
+		fileConn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
+		if err != nil {
+			log.Printf("Failed to connect for file %s: %v", filePath, err)
+			continue
+		}
+
+		// Set connection timeouts.
+		if err := fileConn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
+			log.Printf("Failed to set read deadline for file %s: %v", filePath, err)
+			fileConn.Close()
+			continue
+		}
+		if err := fileConn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
+			log.Printf("Failed to set write deadline for file %s: %v", filePath, err)
+			fileConn.Close()
+			continue
+		}
+
+		// Calculate the relative path from the root directory.
+		relPath, err := filepath.Rel(dirPath, filePath)
+		if err != nil {
+			log.Printf("Failed to calculate relative path for %s: %v", filePath, err)
+			fileConn.Close()
+			continue
+		}
+
+		// Transfer the file with the relative path.
+		// The `transferFile` function will then handle the file transfer with the relative path instead of the plain file name.
+		if err := transferFile(ctx, fileConn, filePath, relPath); err != nil {
+			log.Printf("Failed to transfer file %s: %v", filePath, err)
+		}
+
+		// Close the connection for this file.
+		fileConn.Close()
+	}
+
+	log.Printf("Directory transfer completed: %s", dirPath)
+	return nil
 }

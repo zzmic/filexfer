@@ -21,7 +21,7 @@ import (
 // Custom error types for better error handling.
 var (
 	ErrInvalidFileSize = errors.New("invalid file size")
-	ErrEmptyFilename   = errors.New("empty filename")
+	ErrEmptyFilename   = errors.New("empty file name")
 	ErrFileTooLarge    = errors.New("file size exceeds maximum allowed size")
 )
 
@@ -60,22 +60,32 @@ func validateHeader(header *protocol.Header) error {
 		return fmt.Errorf("header is nil")
 	}
 
-	if header.Filename == "" {
-		return fmt.Errorf("%w: filename cannot be empty", ErrEmptyFilename)
+	if header.FileName == "" {
+		return fmt.Errorf("%w: file name cannot be empty", ErrEmptyFilename)
 	}
 
 	if header.FileSize == 0 {
 		return fmt.Errorf("%w: file size cannot be zero", ErrInvalidFileSize)
 	}
 
-	if header.FileSize > MaxFileSize {
+	// Check the file size based on the transfer type.
+	maxSize := MaxFileSize
+	if header.TransferType == protocol.TransferTypeDirectory {
+		maxSize = protocol.MaxDirectorySize
+	}
+
+	if header.FileSize > uint64(maxSize) {
 		return fmt.Errorf("%w: file size %d exceeds maximum allowed size %d",
-			ErrFileTooLarge, header.FileSize, MaxFileSize)
+			ErrFileTooLarge, header.FileSize, maxSize)
 	}
 
 	// Validate the file name to prevent directory traversal (for security).
-	if filepath.Base(header.Filename) != header.Filename {
-		return fmt.Errorf("invalid filename: contains path separators: %s", header.Filename)
+	// Allow relative paths but prevent absolute paths and parent directory traversal.
+	if filepath.IsAbs(header.FileName) {
+		return fmt.Errorf("invalid file name: absolute paths not allowed: %s", header.FileName)
+	}
+	if strings.Contains(header.FileName, "..") {
+		return fmt.Errorf("invalid file name: parent directory traversal not allowed: %s", header.FileName)
 	}
 
 	return nil
@@ -90,7 +100,7 @@ func sendErrorResponse(conn net.Conn, message string) {
 }
 
 // Function to handle file conflicts by applying the specified strategy.
-func handleFileConflict(originalPath, filename string, strategy string) (string, error) {
+func handleFileConflict(originalPath, fileName string, strategy string) (string, error) {
 	// Check if the file exists.
 	if _, err := os.Stat(originalPath); os.IsNotExist(err) {
 		// If the file doesn't exist, return the original path.
@@ -107,8 +117,8 @@ func handleFileConflict(originalPath, filename string, strategy string) (string,
 		return originalPath, nil
 
 	case StrategyRename:
-		// Generate a new filename with a suffix.
-		return generateUniqueFilename(originalPath, filename), nil
+		// Generate a new file name with a suffix.
+		return generateUniqueFilename(originalPath, fileName), nil
 
 	case StrategySkip:
 		// Return an error to indicate that the file should be skipped.
@@ -119,20 +129,20 @@ func handleFileConflict(originalPath, filename string, strategy string) (string,
 	}
 }
 
-// Function to generate a unique filename by adding a numeric suffix.
-func generateUniqueFilename(originalPath, filename string) string {
+// Function to generate a unique file name by adding a numeric suffix.
+func generateUniqueFilename(originalPath, fileName string) string {
 	dir := filepath.Dir(originalPath)
-	ext := filepath.Ext(filename)
-	baseName := strings.TrimSuffix(filename, ext)
+	ext := filepath.Ext(fileName)
+	baseName := strings.TrimSuffix(fileName, ext)
 
 	counter := 1
 	for {
-		newFilename := fmt.Sprintf("%s_%d%s", baseName, counter, ext)
-		newPath := filepath.Join(dir, newFilename)
+		newFileName := fmt.Sprintf("%s_%d%s", baseName, counter, ext)
+		newPath := filepath.Join(dir, newFileName)
 
 		if _, err := os.Stat(newPath); os.IsNotExist(err) {
 			// If the file doesn't exist, return the new path.
-			log.Printf("Renaming file to avoid conflict: %s -> %s", filename, newFilename)
+			log.Printf("Renaming file to avoid conflict: %s -> %s", fileName, newFileName)
 			return newPath
 		}
 		// Increment the counter and try again if the file already exists.
@@ -199,8 +209,12 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		return
 	}
 
-	// Log file reception start.
-	log.Printf("Receiving file from %s: %s (size: %d bytes)", clientAddr, header.Filename, header.FileSize)
+	// Log transfer reception start.
+	transferType := "file"
+	if header.TransferType == protocol.TransferTypeDirectory {
+		transferType = "directory"
+	}
+	log.Printf("Receiving %s from %s: %s (size: %d bytes)", transferType, clientAddr, header.FileName, header.FileSize)
 
 	// Create the directory to save the received file (if it doesn't exist).
 	// `0755`: "OwnerCanDoAllExecuteGroupOtherCanReadExecute" (https://pkg.go.dev/gitlab.com/evatix-go/core/filemode).
@@ -210,9 +224,27 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		return
 	}
 
-	// Augment the file name with "received_" to indicate that the file is received.
-	receivedFileName := "received_" + header.Filename
-	outputPath := filepath.Join(*destDir, receivedFileName)
+	// Handle the file path:
+	var outputPath string
+	var receivedFileName string
+
+	// If the file name contains directory separators (either `/` or `\`), it is a relative path,
+	// so preserve the directory structure.
+	if strings.Contains(header.FileName, "/") || strings.Contains(header.FileName, string(filepath.Separator)) {
+		outputPath = filepath.Join(*destDir, header.FileName)
+		receivedFileName = header.FileName
+		// Create the directory structure if it doesn't exist.
+		outputDir := filepath.Dir(outputPath)
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			log.Printf("Failed to create directory structure %s for client %s: %v", outputDir, clientAddr, err)
+			sendErrorResponse(conn, "Failed to create directory structure")
+			return
+		}
+	} else {
+		// Since it is a simple file name, use the original name.
+		receivedFileName = header.FileName
+		outputPath = filepath.Join(*destDir, receivedFileName)
+	}
 
 	// Handle file conflicts using the specified strategy.
 	finalPath, err := handleFileConflict(outputPath, receivedFileName, *fileStrategy)
@@ -281,8 +313,40 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 	}
 	log.Printf("Data checksum verification successful")
 
+	// Handle single file transfer (directories are now handled as individual files).
+	if err := handleFileTransfer(ctx, conn, clientAddr, header, fileBuffer, finalPath); err != nil {
+		log.Printf("Failed to handle file transfer from %s: %v", clientAddr, err)
+		sendErrorResponse(conn, fmt.Sprintf("Failed to handle file transfer: %v", err))
+		return
+	}
+
+	// Send the success response to the client.
+	successMsg := "SUCCESS: Transfer received successfully!\n"
+	if _, err := conn.Write([]byte(successMsg)); err != nil {
+		log.Printf("Failed to send success response to client %s: %v", clientAddr, err)
+	}
+
+	transferDuration := time.Since(startTime)
+	log.Printf("Transfer completed from %s (duration: %v)", clientAddr, transferDuration)
+}
+
+// Function to handle the transfer of a single file.
+func handleFileTransfer(ctx context.Context, conn net.Conn, clientAddr string, header *protocol.Header, fileBuffer []byte, finalPath string) error {
+	// Create the output file.
+	outputFile, err := os.Create(finalPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %v", err)
+	}
+
+	// Close the output file when the surrounding function exits.
+	defer func() {
+		if err := outputFile.Close(); err != nil {
+			log.Printf("Error closing output file %s: %v", finalPath, err)
+		}
+	}()
+
 	// Write the verified buffer to disk with progress tracking.
-	progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Writing %s", header.Filename))
+	progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Writing %s", header.FileName))
 	bytesWritten, err := progressWriter.Write(fileBuffer)
 	if err != nil {
 		log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
@@ -302,7 +366,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		if err := os.Remove(finalPath); err != nil {
 			log.Printf("Failed to remove partial file %s: %v", finalPath, err)
 		}
-		return
+		return fmt.Errorf("failed to write file content: %v", err)
 	}
 
 	// Mark transfer as complete and log the final statistics.
@@ -317,23 +381,12 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		if err := os.Remove(finalPath); err != nil {
 			log.Printf("Failed to remove incomplete file %s: %v", finalPath, err)
 		}
-		return
+		return fmt.Errorf("file size mismatch: expected %d, received %d", len(fileBuffer), bytesWritten)
 	}
 
 	// File data integrity verified successfully.
-	log.Printf("File integrity verified for %s", header.Filename)
-
-	// Send the success response to the client.
-	successMsg := fmt.Sprintf("SUCCESS: File received successfully! %d bytes written to %s\n",
-		bytesWritten, finalPath)
-	if _, err := conn.Write([]byte(successMsg)); err != nil {
-		log.Printf("Failed to send success response to client %s: %v", clientAddr, err)
-	}
-
-	transferDuration := time.Since(startTime)
-	transferRate := float64(bytesWritten) / transferDuration.Seconds() / 1024 / 1024 // MB/s.
-	log.Printf("File transfer completed from %s: %d bytes written to %s (duration: %v, rate: %.2f MB/s)",
-		clientAddr, bytesWritten, finalPath, transferDuration, transferRate)
+	log.Printf("File integrity verified for %s", header.FileName)
+	return nil
 }
 
 // Function to read from the connection with context support.
