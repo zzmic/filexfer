@@ -192,6 +192,15 @@ func main() {
 		cancel()
 	}()
 
+	// Handle a directory transfer.
+	if isDirectory {
+		if err := transferDirectory(ctx, *filePath); err != nil {
+			log.Fatalf("Directory transfer failed: %v", err)
+		}
+		return
+	}
+
+	// Handle a single file transfer.
 	log.Printf("Connecting to the server at %s...", *serverAddr)
 
 	// Establish a TCP connection to the server using the server's address.
@@ -358,9 +367,26 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 	}
 
 	transferDuration := time.Since(startTime)
-	transferRate := float64(bytesWritten) / transferDuration.Seconds() / 1024 / 1024 // MB/s.
-	log.Printf("File sent successfully! %d bytes sent in %v (%.2f MB/s)",
-		bytesWritten, transferDuration, transferRate)
+
+	// Calculate the transfer rate.
+	var transferRate float64
+	if transferDuration.Seconds() > 0 {
+		transferRate = float64(bytesWritten) / transferDuration.Seconds() / 1024 / 1024 // MB/s.
+	} else {
+		transferRate = 0
+	}
+
+	// Format the output based on the t	ransfer size.
+	if bytesWritten < 1024 {
+		log.Printf("File sent successfully! %d bytes sent in %v",
+			bytesWritten, transferDuration)
+	} else if bytesWritten < 1024*1024 {
+		log.Printf("File sent successfully! %.1f KB sent in %v (%.2f MB/s)",
+			float64(bytesWritten)/1024, transferDuration, transferRate)
+	} else {
+		log.Printf("File sent successfully! %.1f MB sent in %v (%.2f MB/s)",
+			float64(bytesWritten)/1024/1024, transferDuration, transferRate)
+	}
 
 	return nil
 }
@@ -385,24 +411,44 @@ func transferDirectory(ctx context.Context, dirPath string) error {
 
 	log.Printf("Found %d files to transfer in directory %s", len(allFiles), dirPath)
 
+	// Track the transfer statistics.
+	var successfulTransfers, failedTransfers int
+	var totalBytesTransferred int64
+
 	// Transfer each file individually using separate connections.
-	for _, filePath := range allFiles {
+	for i, filePath := range allFiles {
+		// Check if the context is cancelled.
+		select {
+		case <-ctx.Done():
+			log.Printf("Directory transfer interrupted due to shutdown signal")
+			return fmt.Errorf("directory transfer interrupted: %v", ctx.Err())
+		default:
+		}
+
 		// Create a new connection for each file to avoid protocol issues.
 		fileConn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
 		if err != nil {
 			log.Printf("Failed to connect for file %s: %v", filePath, err)
+			failedTransfers++
 			continue
 		}
+
+		// Ensure connection is closed in all cases.
+		defer func(conn net.Conn, path string) {
+			if err := conn.Close(); err != nil {
+				log.Printf("Error closing connection for %s: %v", path, err)
+			}
+		}(fileConn, filePath)
 
 		// Set connection timeouts.
 		if err := fileConn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
 			log.Printf("Failed to set read deadline for file %s: %v", filePath, err)
-			fileConn.Close()
+			failedTransfers++
 			continue
 		}
 		if err := fileConn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
 			log.Printf("Failed to set write deadline for file %s: %v", filePath, err)
-			fileConn.Close()
+			failedTransfers++
 			continue
 		}
 
@@ -410,20 +456,37 @@ func transferDirectory(ctx context.Context, dirPath string) error {
 		relPath, err := filepath.Rel(dirPath, filePath)
 		if err != nil {
 			log.Printf("Failed to calculate relative path for %s: %v", filePath, err)
-			fileConn.Close()
+			failedTransfers++
 			continue
 		}
+
+		// Log progress for directory transfer.
+		fmt.Printf("Transferring file %d/%d: %s\n", i+1, len(allFiles), relPath)
 
 		// Transfer the file with the relative path.
 		// The `transferFile` function will then handle the file transfer with the relative path instead of the plain file name.
 		if err := transferFile(ctx, fileConn, filePath, relPath); err != nil {
 			log.Printf("Failed to transfer file %s: %v", filePath, err)
+			failedTransfers++
+			continue
 		}
 
-		// Close the connection for this file.
-		fileConn.Close()
+		// Get file size for statistics.
+		if fileInfo, err := os.Stat(filePath); err == nil {
+			totalBytesTransferred += fileInfo.Size()
+		}
+		successfulTransfers++
 	}
 
+	// Log the final directory transfer statistics.
 	log.Printf("Directory transfer completed: %s", dirPath)
+	log.Printf("Transfer summary: %d successful, %d failed, %d total bytes",
+		successfulTransfers, failedTransfers, totalBytesTransferred)
+
+	if failedTransfers > 0 {
+		return fmt.Errorf("directory transfer completed with %d failed transfers out of %d total files",
+			failedTransfers, len(allFiles))
+	}
+
 	return nil
 }

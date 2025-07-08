@@ -46,10 +46,26 @@ func (pt *ProgressTracker) Complete() {
 	pt.displayProgress()
 
 	duration := time.Since(pt.startTime)
-	rate := float64(pt.totalBytes) / duration.Seconds() / 1024 / 1024 // MB/s.
 
-	fmt.Printf("\n%s completed! %d bytes in %v (%.2f MB/s)\n",
-		pt.description, pt.totalBytes, duration, rate)
+	// Calculate the transfer rate.
+	var rate float64
+	if duration.Seconds() > 0 {
+		rate = float64(pt.totalBytes) / duration.Seconds() / 1024 / 1024 // MB/s.
+	} else {
+		rate = 0
+	}
+
+	// Format the output based on transfer size.
+	if pt.totalBytes < 1024 {
+		fmt.Printf("\n%s completed! %d bytes in %v\n",
+			pt.description, pt.totalBytes, duration)
+	} else if pt.totalBytes < 1024*1024 {
+		fmt.Printf("\n%s completed! %.1f KB in %v (%.2f MB/s)\n",
+			pt.description, float64(pt.totalBytes)/1024, duration, rate)
+	} else {
+		fmt.Printf("\n%s completed! %.1f MB in %v (%.2f MB/s)\n",
+			pt.description, float64(pt.totalBytes)/1024/1024, duration, rate)
+	}
 }
 
 // Function to display the current progress with a progress bar.
@@ -61,9 +77,29 @@ func (pt *ProgressTracker) displayProgress() {
 	percentage := float64(pt.bytesTransferred) / float64(pt.totalBytes) * 100
 	progressBar := pt.createProgressBar(percentage)
 	duration := time.Since(pt.startTime)
-	rate := float64(pt.bytesTransferred) / duration.Seconds() / 1024 / 1024 // MB/s.
-	fmt.Printf("\r%s %s %.1f%% (%d/%d bytes, %.2f MB/s)",
-		pt.description, progressBar, percentage, pt.bytesTransferred, pt.totalBytes, rate)
+
+	// Calculate the transfer rate.
+	var rate float64
+	if duration.Seconds() > 0 {
+		rate = float64(pt.bytesTransferred) / duration.Seconds() / 1024 / 1024 // MB/s.
+	} else {
+		rate = 0
+	}
+
+	// Format the display based on transfer size.
+	var sizeDisplay string
+	if pt.totalBytes < 1024 {
+		sizeDisplay = fmt.Sprintf("%d/%d bytes", pt.bytesTransferred, pt.totalBytes)
+	} else if pt.totalBytes < 1024*1024 {
+		sizeDisplay = fmt.Sprintf("%.1f/%.1f KB",
+			float64(pt.bytesTransferred)/1024, float64(pt.totalBytes)/1024)
+	} else {
+		sizeDisplay = fmt.Sprintf("%.1f/%.1f MB",
+			float64(pt.bytesTransferred)/1024/1024, float64(pt.totalBytes)/1024/1024)
+	}
+
+	fmt.Printf("\r%s %s %.1f%% (%s, %.2f MB/s)",
+		pt.description, progressBar, percentage, sizeDisplay, rate)
 }
 
 // Function to create a visual progress bar.

@@ -187,14 +187,15 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 	header, err := protocol.ReadHeader(conn)
 	if err != nil {
 		log.Printf("Failed to read file transfer header from %s: %v", clientAddr, err)
-		if errors.Is(err, io.EOF) {
-			log.Printf("Client %s disconnected before sending header", clientAddr)
+
+		// Create an error message with the error details.
+		errorMsg := "Failed to read file transfer header: " + err.Error()
+
+		// Send the error response to the client.
+		// Only send error response if connection is still valid.
+		if !errors.Is(err, io.EOF) {
+			sendErrorResponse(conn, errorMsg)
 		}
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			log.Printf("Client %s sent incomplete header", clientAddr)
-		}
-		// Fallback to a generic message.
-		sendErrorResponse(conn, "Failed to read file header")
 		return
 	}
 

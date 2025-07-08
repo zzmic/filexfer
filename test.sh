@@ -42,12 +42,14 @@ echo "Test 1: Single file transfer"
 ./bin/client -server localhost:8080 -file ./test/file0.txt
 echo "Result:"
 ls -la ./test_output/
+rm -f ./test_output/file0.txt # Remove this particular file for later tests.
 
 # Test 2: Directory transfer.
 echo -e "\nTest 2: Directory transfer"
 ./bin/client -server localhost:8080 -file ./test
 echo "Result:"
 find ./test_output -type f
+rm -f ./test_output/file1.txt # Remove this particular file for later tests.
 
 # Test 3: Different file types.
 echo -e "\nTest 3: Different file types"
