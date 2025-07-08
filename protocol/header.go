@@ -62,10 +62,6 @@ func validateHeader(header *Header) error {
 		return fmt.Errorf("%w: filename contains null bytes", ErrInvalidFileName)
 	}
 
-	if header.FileSize == 0 {
-		return fmt.Errorf("%w: file size cannot be zero", ErrInvalidFileSize)
-	}
-
 	if header.Checksum == nil {
 		return fmt.Errorf("%w: checksum cannot be nil", ErrInvalidChecksum)
 	}

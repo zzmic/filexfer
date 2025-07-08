@@ -64,10 +64,6 @@ func validateHeader(header *protocol.Header) error {
 		return fmt.Errorf("%w: file name cannot be empty", ErrEmptyFilename)
 	}
 
-	if header.FileSize == 0 {
-		return fmt.Errorf("%w: file size cannot be zero", ErrInvalidFileSize)
-	}
-
 	// Check the file size based on the transfer type.
 	maxSize := MaxFileSize
 	if header.TransferType == protocol.TransferTypeDirectory {
