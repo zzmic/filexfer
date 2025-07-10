@@ -14,7 +14,7 @@ The utility operates through a client-server architecture:
 ## Supported Transfer Types
 
 ### Single File Transfers
-- **File validation**: Size limits (2GB), filename validation, path traversal protection.
+- **File validation**: Size limits (5GB), filename validation, path traversal protection.
 - **Checksum verification**: SHA256 checksums for data integrity.
 - **Progress tracking**: Real-time progress bars with transfer rates.
 - **Error handling**: Comprehensive error reporting and recovery.
@@ -22,7 +22,7 @@ The utility operates through a client-server architecture:
 ### Directory Transfers
 - **Recursive scanning**: Complete directory tree traversal.
 - **Relative path preservation**: Maintains directory structure.
-- **Size validation**: Total directory size limits (10GB).
+- **Size validation**: Total directory size limits (50GB).
 - **File metadata**: Preserves file modes and timestamps.
 
 ## Project Structure
@@ -87,7 +87,7 @@ The binary protocol uses a fixed-size header (329 bytes) containing:
 
 ### Security and Validation
 - **Path traversal protection**: Prevents path traversal attacks.
-- **Size limits**: Configurable maximum file (2GB) and directory (10GB) sizes.
+- **Size limits**: Configurable maximum file (5GB) and directory (50GB) sizes.
 - **Checksum verification**: SHA256 checksums for data integrity.
 - **Input validation**: Comprehensive filename and path validation.
 
@@ -120,10 +120,18 @@ chmod +x ./test.sh
 The test script performs:
 - Single file transfers.
 - Directory transfers with nested structures.
-- Large file transfers (100MB+).
+- Large file transfers (500MB+).
 - Conflict resolution testing.
 - Error condition testing.
 - Different file types and edge cases.
+
+```
+# Execute the large directory test script.
+chmod +x ./test_large_directory.sh
+./test_large_directory.sh
+```
+
+The large directory test script creates a large directory structure with various file sizes and types.
 
 ### Test Coverage
 - **File transfers**: Various file sizes and types.
