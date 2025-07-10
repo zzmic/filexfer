@@ -18,7 +18,7 @@ var (
 
 // Constants for directory transfer.
 const (
-	MaxDirectorySize = 1 * 1024 * 1024 * 1024 // 1GB limit for directory transfers.
+	MaxDirectorySize = 10 * 1024 * 1024 * 1024 // 10GB limit for directory transfers.
 )
 
 // Struct to represent a file within a directory transfer.

@@ -34,11 +34,11 @@ const (
 
 // Constants to constrain the maximum file size, log prefix, and timeouts.
 const (
-	MaxFileSize     = 100 * 1024 * 1024 // 100MB limit.
-	LogPrefix       = "[SERVER]"        // Log prefix.
-	ReadTimeout     = 30 * time.Second  // Read timeout.
-	WriteTimeout    = 30 * time.Second  // Write timeout.
-	ShutdownTimeout = 30 * time.Second  // Shutdown timeout.
+	MaxFileSize     = 2 * 1024 * 1024 * 1024 // 2GB limit.
+	LogPrefix       = "[SERVER]"             // Log prefix.
+	ReadTimeout     = 30 * time.Second       // Read timeout.
+	WriteTimeout    = 30 * time.Second       // Write timeout.
+	ShutdownTimeout = 30 * time.Second       // Shutdown timeout.
 )
 
 // Command-line flags.

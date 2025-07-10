@@ -17,7 +17,7 @@ echo "./test/file0.txt content" > ./test/file0.txt
 echo '{"key": "value"}' > ./test/file1.txt
 echo '{"another_key": "another_value"}' > ./test.json
 touch ./empty_file.txt
-dd if=/dev/zero of=./large_file.dat bs=1M count=5 2>/dev/null # Create a large file of 5MB which is simply zero-filled.
+dd if=/dev/zero of=./large_file.dat bs=1M count=100 2>/dev/null # Create a large file of 100MB which is simply zero-filled.
 
 # Build the applications.
 echo "Building applications..."
@@ -59,7 +59,7 @@ echo "Result:"
 ls -la ./test_output/
 
 # Test 4: Large file.
-echo -e "\nTest 4: Large file transfer"
+echo -e "\nTest 4: Large file transfer (100MB)"
 time ./bin/client -server localhost:8080 -file ./large_file.dat
 echo "Large file transfer completed"
 

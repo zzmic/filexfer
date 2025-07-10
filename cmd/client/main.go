@@ -28,12 +28,12 @@ var (
 
 // Constants to constrain the maximum file size, log prefix, and timeouts.
 const (
-	MaxFileSize       = 100 * 1024 * 1024 // 100MB limit.
-	LogPrefix         = "[CLIENT]"        // Log prefix.
-	ConnectionTimeout = 30 * time.Second  // Connection timeout.
-	ReadTimeout       = 30 * time.Second  // Read timeout.
-	WriteTimeout      = 30 * time.Second  // Write timeout.
-	ShutdownTimeout   = 30 * time.Second  // Shutdown timeout.
+	MaxFileSize       = 2 * 1024 * 1024 * 1024 // 2GB limit.
+	LogPrefix         = "[CLIENT]"             // Log prefix.
+	ConnectionTimeout = 30 * time.Second       // Connection timeout.
+	ReadTimeout       = 30 * time.Second       // Read timeout.
+	WriteTimeout      = 30 * time.Second       // Write timeout.
+	ShutdownTimeout   = 30 * time.Second       // Shutdown timeout.
 )
 
 // Command-line flags for the client.
