@@ -34,7 +34,7 @@ var (
 	ErrInvalidTransferType  = errors.New("invalid transfer type in header")
 )
 
-// Struct to represent the file transfer header.
+// A Header represents the file transfer header.
 type Header struct {
 	FileSize      uint64 // Size of the file or directory in bytes.
 	FileName      string // Name of the file or directory.
@@ -43,7 +43,7 @@ type Header struct {
 	DirectoryPath string // Path of the directory (only used for directory transfers).
 }
 
-// Function to validate the header data.
+// validateHeader validates the header data.
 func validateHeader(header *Header) error {
 	if header == nil {
 		return fmt.Errorf("header is nil")
@@ -84,7 +84,7 @@ func validateHeader(header *Header) error {
 	return nil
 }
 
-// Function to write the header to the given writer.
+// WriteHeader writes the header to the given writer.
 func WriteHeader(w io.Writer, header *Header) error {
 	if w == nil {
 		return fmt.Errorf("writer is nil")

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Struct to track the progress of file transfers.
+// A ProgressTracker tracks the progress of file transfers.
 type ProgressTracker struct {
 	totalBytes        int64
 	bytesTransferred  int64
@@ -17,7 +17,19 @@ type ProgressTracker struct {
 	description       string
 }
 
-// Function to create a new progress tracker.
+// A ProgressReader wraps an io.Reader and tracks progress.
+type ProgressReader struct {
+	reader  io.Reader
+	tracker *ProgressTracker
+}
+
+// A ProgressWriter wraps an io.Writer and tracks progress.
+type ProgressWriter struct {
+	writer  io.Writer
+	tracker *ProgressTracker
+}
+
+// NewProgressTracker creates a new progress tracker.
 func NewProgressTracker(totalBytes int64, description string) *ProgressTracker {
 	return &ProgressTracker{
 		totalBytes:        totalBytes,
@@ -29,7 +41,7 @@ func NewProgressTracker(totalBytes int64, description string) *ProgressTracker {
 	}
 }
 
-// Function to update the progress and display it if enough time has passed.
+// Update updates the progress and displays it if enough time has passed.
 func (pt *ProgressTracker) Update(bytesTransferred int64) {
 	pt.bytesTransferred = bytesTransferred
 
@@ -40,14 +52,13 @@ func (pt *ProgressTracker) Update(bytesTransferred int64) {
 	}
 }
 
-// Function to display the final progress and transfer statistics.
+// Complete displays the final progress and transfer statistics.
 func (pt *ProgressTracker) Complete() {
 	pt.bytesTransferred = pt.totalBytes
 	pt.displayProgress()
 
 	duration := time.Since(pt.startTime)
 
-	// Calculate the transfer rate.
 	var rate float64
 	if duration.Seconds() > 0 {
 		rate = float64(pt.totalBytes) / duration.Seconds() / 1024 / 1024 // MB/s.
@@ -55,7 +66,6 @@ func (pt *ProgressTracker) Complete() {
 		rate = 0
 	}
 
-	// Format the output based on transfer size.
 	if pt.totalBytes < 1024 {
 		fmt.Printf("\n%s completed! %d bytes in %v\n",
 			pt.description, pt.totalBytes, duration)
@@ -68,7 +78,7 @@ func (pt *ProgressTracker) Complete() {
 	}
 }
 
-// Function to display the current progress with a progress bar.
+// displayProgress displays the current progress with a progress bar.
 func (pt *ProgressTracker) displayProgress() {
 	if pt.totalBytes == 0 {
 		return
@@ -78,7 +88,6 @@ func (pt *ProgressTracker) displayProgress() {
 	progressBar := pt.createProgressBar(percentage)
 	duration := time.Since(pt.startTime)
 
-	// Calculate the transfer rate.
 	var rate float64
 	if duration.Seconds() > 0 {
 		rate = float64(pt.bytesTransferred) / duration.Seconds() / 1024 / 1024 // MB/s.
@@ -86,7 +95,6 @@ func (pt *ProgressTracker) displayProgress() {
 		rate = 0
 	}
 
-	// Format the display based on transfer size.
 	var sizeDisplay string
 	if pt.totalBytes < 1024 {
 		sizeDisplay = fmt.Sprintf("%d/%d bytes", pt.bytesTransferred, pt.totalBytes)
@@ -102,7 +110,7 @@ func (pt *ProgressTracker) displayProgress() {
 		pt.description, progressBar, percentage, sizeDisplay, rate)
 }
 
-// Function to create a visual progress bar.
+// createProgressBar creates a visual progress bar.
 func (pt *ProgressTracker) createProgressBar(percentage float64) string {
 	const barWidth = 30
 	filled := int(percentage / 100 * barWidth)
@@ -113,13 +121,7 @@ func (pt *ProgressTracker) createProgressBar(percentage float64) string {
 	return "[" + bar + "]"
 }
 
-// Struct to wrap an io.Reader and track progress.
-type ProgressReader struct {
-	reader  io.Reader
-	tracker *ProgressTracker
-}
-
-// Function to create a new progress reader.
+// NewProgressReader creates a new progress reader.
 func NewProgressReader(reader io.Reader, totalBytes int64, description string) *ProgressReader {
 	return &ProgressReader{
 		reader:  reader,
@@ -127,7 +129,7 @@ func NewProgressReader(reader io.Reader, totalBytes int64, description string) *
 	}
 }
 
-// Function to read from the reader and update the progress.
+// Read reads from the reader and updates the progress.
 func (pr *ProgressReader) Read(p []byte) (n int, err error) {
 	n, err = pr.reader.Read(p)
 	if n > 0 {
@@ -136,18 +138,12 @@ func (pr *ProgressReader) Read(p []byte) (n int, err error) {
 	return n, err
 }
 
-// Function to mark the transfer as complete.
+// Complete (for ProgressReader) marks the transfer as complete.
 func (pr *ProgressReader) Complete() {
 	pr.tracker.Complete()
 }
 
-// Struct to wrap an io.Writer and track progress.
-type ProgressWriter struct {
-	writer  io.Writer
-	tracker *ProgressTracker
-}
-
-// Function to create a new progress writer.
+// NewProgressWriter creates a new progress writer.
 func NewProgressWriter(writer io.Writer, totalBytes int64, description string) *ProgressWriter {
 	return &ProgressWriter{
 		writer:  writer,
@@ -155,7 +151,7 @@ func NewProgressWriter(writer io.Writer, totalBytes int64, description string) *
 	}
 }
 
-// Function to write to the writer and update the progress.
+// Write writes to the writer and updates the progress.
 func (pw *ProgressWriter) Write(p []byte) (n int, err error) {
 	n, err = pw.writer.Write(p)
 	if n > 0 {
@@ -164,7 +160,7 @@ func (pw *ProgressWriter) Write(p []byte) (n int, err error) {
 	return n, err
 }
 
-// Function to mark the transfer as complete.
+// Complete (for ProgressWriter) marks the transfer as complete.
 func (pw *ProgressWriter) Complete() {
 	pw.tracker.Complete()
 }

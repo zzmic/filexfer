@@ -22,7 +22,8 @@ The utility operates through a client-server architecture:
 ### Directory Transfers
 - **Recursive scanning**: Complete directory tree traversal.
 - **Relative path preservation**: Maintains directory structure.
-- **Size validation**: Total directory size limits (50GB).
+- **Size validation**: Configurable total directory size limits (default 50GB).
+- **Per-client tracking**: Individual client directory transfer size monitoring.
 - **File metadata**: Preserves file modes and timestamps.
 
 ## Project Structure
@@ -46,7 +47,7 @@ go build -o ./bin/server ./cmd/server/main.go
 
 ### Running the Server
 ```
-./bin/server [-port <port>] [-dir <directory>] [-strategy <strategy>]
+./bin/server [-port <port>] [-dir <directory>] [-strategy <strategy>] [-max-dir-size <bytes>]
 
   -port string
         Listening port (default "8080").
@@ -54,6 +55,8 @@ go build -o ./bin/server ./cmd/server/main.go
         Destination directory for received files (default "test").
   -strategy string
         File conflict strategy: overwrite, rename, or skip (default "rename").
+  -max-dir-size uint64
+        Maximum directory transfer size in bytes (default 53687091200 = 50GB).
 ```
 
 ### Running the Client
@@ -87,7 +90,8 @@ The binary protocol uses a fixed-size header (329 bytes) containing:
 
 ### Security and Validation
 - **Path traversal protection**: Prevents path traversal attacks.
-- **Size limits**: Configurable maximum file (5GB) and directory (50GB) sizes.
+- **Size limits**: Configurable maximum file (5GB) and directory (default 50GB) sizes.
+- **Per-client directory limits**: Individual client directory transfer size tracking and validation.
 - **Checksum verification**: SHA256 checksums for data integrity.
 - **Input validation**: Comprehensive filename and path validation.
 

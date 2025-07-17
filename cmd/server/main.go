@@ -20,9 +20,10 @@ import (
 
 // Custom error types for better error handling.
 var (
-	ErrInvalidFileSize = errors.New("invalid file size")
-	ErrEmptyFilename   = errors.New("empty file name")
-	ErrFileTooLarge    = errors.New("file size exceeds maximum allowed size")
+	ErrInvalidFileSize   = errors.New("invalid file size")
+	ErrEmptyFilename     = errors.New("empty file name")
+	ErrFileTooLarge      = errors.New("file size exceeds maximum allowed size")
+	ErrDirectoryTooLarge = errors.New("directory transfer size exceeds maximum allowed size")
 )
 
 // Constants to represent the file conflict handling strategies.
@@ -34,28 +35,36 @@ const (
 
 // Constants to constrain the maximum file size, log prefix, and timeouts.
 const (
-	MaxFileSize     = 5 * 1024 * 1024 * 1024 // 5GB limit.
-	LogPrefix       = "[SERVER]"             // Log prefix.
-	ReadTimeout     = 30 * time.Second       // Read timeout.
-	WriteTimeout    = 30 * time.Second       // Write timeout.
-	ShutdownTimeout = 30 * time.Second       // Shutdown timeout.
+	MaxFileSize      = 5 * 1024 * 1024 * 1024  // 5GB limit.
+	MaxDirectorySize = 50 * 1024 * 1024 * 1024 // 50GB limit for directory transfers.
+	LogPrefix        = "[SERVER]"              // Log prefix.
+	ReadTimeout      = 30 * time.Second        // Read timeout.
+	WriteTimeout     = 30 * time.Second        // Write timeout.
+	ShutdownTimeout  = 30 * time.Second        // Shutdown timeout.
 )
 
-// Command-line flags.
+// Command-line flags for the server.
 var (
-	listenPort   = flag.String("port", "8080", "Listening port")
-	destDir      = flag.String("dir", "test", "Destination directory for received files")
-	fileStrategy = flag.String("strategy", "rename", "File conflict strategy: overwrite, rename, or skip")
+	listenPort       = flag.String("port", "8080", "Listening port")
+	destDir          = flag.String("dir", "test", "Destination directory for received files")
+	fileStrategy     = flag.String("strategy", "rename", "File conflict strategy: overwrite, rename, or skip")
+	maxDirectorySize = flag.Uint64("max-dir-size", MaxDirectorySize, "Maximum directory transfer size in bytes")
 )
 
-// Function to configure structured logging with timestamps and custom prefix.
+// Global directory transfer size tracking per client.
+var (
+	directorySizes = make(map[string]uint64) // clientAddr -> total directory size.
+	dirSizeMutex   sync.RWMutex              // protects directorySizes map.
+)
+
+// setupLogging configures structured logging with timestamps and custom prefix.
 func setupLogging() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 	log.SetPrefix(LogPrefix + " ")
 }
 
-// Function to perform comprehensive validation of the file transfer header.
-func validateHeader(header *protocol.Header) error {
+// validateHeader performs comprehensive validation of the file transfer header.
+func validateHeader(header *protocol.Header, clientAddr string) error {
 	if header == nil {
 		return fmt.Errorf("header is nil")
 	}
@@ -65,14 +74,24 @@ func validateHeader(header *protocol.Header) error {
 	}
 
 	// Check the file size based on the transfer type.
-	maxSize := MaxFileSize
-	if header.TransferType == protocol.TransferTypeDirectory {
-		maxSize = protocol.MaxDirectorySize
-	}
-
-	if header.FileSize > uint64(maxSize) {
+	// Individual files should be limited to 5GB regardless of transfer type.
+	maxSize := uint64(MaxFileSize)
+	if header.FileSize > maxSize {
 		return fmt.Errorf("%w: file size %d exceeds maximum allowed size %d",
 			ErrFileTooLarge, header.FileSize, maxSize)
+	}
+
+	// Validate directory transfer size limits for directory transfers.
+	if header.TransferType == protocol.TransferTypeDirectory {
+		dirSizeMutex.Lock()
+		currentDirSize := directorySizes[clientAddr]
+		newTotalSize := currentDirSize + header.FileSize
+		dirSizeMutex.Unlock()
+
+		if newTotalSize > *maxDirectorySize {
+			return fmt.Errorf("%w: directory transfer size %d would exceed maximum allowed size %d (current: %d, adding: %d)",
+				ErrDirectoryTooLarge, newTotalSize, *maxDirectorySize, currentDirSize, header.FileSize)
+		}
 	}
 
 	// Validate the file name to prevent directory traversal (for security).
@@ -87,7 +106,7 @@ func validateHeader(header *protocol.Header) error {
 	return nil
 }
 
-// Function to send an error message to the client.
+// sendErrorResponse sends an error message to the client.
 func sendErrorResponse(conn net.Conn, message string) {
 	errorMsg := fmt.Sprintf("ERROR: %s\n", message)
 	if _, err := conn.Write([]byte(errorMsg)); err != nil {
@@ -95,7 +114,21 @@ func sendErrorResponse(conn net.Conn, message string) {
 	}
 }
 
-// Function to handle file conflicts by applying the specified strategy.
+// getDirectoryStats gets directory transfer statistics.
+func getDirectoryStats() (int, uint64) {
+	dirSizeMutex.RLock()
+	defer dirSizeMutex.RUnlock()
+
+	numClient := len(directorySizes)
+	var totalSize uint64
+	for _, size := range directorySizes {
+		totalSize += size
+	}
+
+	return numClient, totalSize
+}
+
+// handleFileConflict handles file conflicts by applying the specified strategy.
 func handleFileConflict(originalPath, fileName string, strategy string) (string, error) {
 	// Check if the file exists.
 	if _, err := os.Stat(originalPath); os.IsNotExist(err) {
@@ -104,20 +137,20 @@ func handleFileConflict(originalPath, fileName string, strategy string) (string,
 	}
 
 	switch strategy {
+	// Remove the existing file and return the original path.
 	case StrategyOverwrite:
-		// Remove the existing file and return the original path.
 		if err := os.Remove(originalPath); err != nil {
 			return "", fmt.Errorf("failed to remove existing file: %v", err)
 		}
 		log.Printf("Overwriting existing file: %s", originalPath)
 		return originalPath, nil
 
+	// Generate a new file name with a suffix and return the new path.
 	case StrategyRename:
-		// Generate a new file name with a suffix.
 		return generateUniqueFilename(originalPath, fileName), nil
 
+	// Return an error to indicate that the file should be skipped (if the file already exists).
 	case StrategySkip:
-		// Return an error to indicate that the file should be skipped.
 		return "", fmt.Errorf("file already exists and skip strategy is enabled: %s", originalPath)
 
 	default:
@@ -125,7 +158,7 @@ func handleFileConflict(originalPath, fileName string, strategy string) (string,
 	}
 }
 
-// Function to generate a unique file name by adding a numeric suffix.
+// generateUniqueFilename generates a unique file name by adding a numeric suffix.
 func generateUniqueFilename(originalPath, fileName string) string {
 	dir := filepath.Dir(originalPath)
 	ext := filepath.Ext(fileName)
@@ -136,36 +169,45 @@ func generateUniqueFilename(originalPath, fileName string) string {
 		newFileName := fmt.Sprintf("%s_%d%s", baseName, counter, ext)
 		newPath := filepath.Join(dir, newFileName)
 
+		// If the file doesn't exist, return the new path.
 		if _, err := os.Stat(newPath); os.IsNotExist(err) {
-			// If the file doesn't exist, return the new path.
 			log.Printf("Renaming file to avoid conflict: %s -> %s", fileName, newFileName)
 			return newPath
 		}
+
 		// Increment the counter and try again if the file already exists.
 		counter++
 	}
 }
 
-// Struct to wrap a net.Conn to support context cancellation and coordination of the transfer with shutdown.
+// A contextReader wraps a net.Conn to support context cancellation and coordination of the transfer with shutdown.
 type contextReader struct {
 	ctx  context.Context
 	conn net.Conn
 }
 
-// Function to handle a client connection with context support for graceful shutdown.
+// handleConnection handles a client connection with context support for graceful shutdown.
 func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 	// Get the start time and the client address of the connection.
 	startTime := time.Now()
 	clientAddr := conn.RemoteAddr().String()
 
 	// Defer the done ("Done decrements the [WaitGroup] counter by one") of the wait group and
-	// the close of the connection ("Close closes the connection.
-	// Any blocked Read or Write operations will be unblocked and return errors.").
+	// the close of the connection ("Close closes the connection. Any blocked Read or Write operations will be unblocked and return errors.").
 	defer func() {
+		// Decrement the `sync.WaitGroup` counter by 1 to indicate that a client connection has finished.
 		wg.Done()
+
+		// Close the connection.
 		if err := conn.Close(); err != nil {
 			log.Printf("Error closing connection to %s: %v", clientAddr, err)
 		}
+
+		// Clean up directory size tracking for this client.
+		dirSizeMutex.Lock()
+		delete(directorySizes, clientAddr)
+		dirSizeMutex.Unlock()
+
 		log.Printf("Connection to %s closed (duration: %v)", clientAddr, time.Since(startTime))
 	}()
 
@@ -200,7 +242,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 	}
 
 	// Validate the header.
-	if err := validateHeader(header); err != nil {
+	if err := validateHeader(header, clientAddr); err != nil {
 		log.Printf("Invalid header from %s: %v", clientAddr, err)
 		sendErrorResponse(conn, fmt.Sprintf("Invalid file header: %v", err))
 		return
@@ -221,12 +263,10 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		return
 	}
 
-	// Handle the file path:
 	var outputPath string
 	var receivedFileName string
 
-	// If the file name contains directory separators (either `/` or `\`), it is a relative path,
-	// so preserve the directory structure.
+	// If the file name contains directory separators (either `/` or `\`), it is a relative path, so preserve the directory structure.
 	if strings.Contains(header.FileName, "/") || strings.Contains(header.FileName, string(filepath.Separator)) {
 		outputPath = filepath.Join(*destDir, header.FileName)
 		receivedFileName = header.FileName
@@ -317,6 +357,16 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		return
 	}
 
+	// Update directory size tracking for successful directory transfers.
+	if header.TransferType == protocol.TransferTypeDirectory {
+		dirSizeMutex.Lock()
+		directorySizes[clientAddr] += header.FileSize
+		currentTotal := directorySizes[clientAddr]
+		dirSizeMutex.Unlock()
+		log.Printf("Directory transfer progress for %s: %d bytes (%.2f GB)",
+			clientAddr, currentTotal, float64(currentTotal)/1024/1024/1024)
+	}
+
 	// Send the success response to the client.
 	successMsg := "SUCCESS: Transfer received successfully!\n"
 	if _, err := conn.Write([]byte(successMsg)); err != nil {
@@ -327,7 +377,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 	log.Printf("Transfer completed from %s (duration: %v)", clientAddr, transferDuration)
 }
 
-// Function to handle the transfer of a single file.
+// handleFileTransfer handles the transfer of a single file.
 func handleFileTransfer(ctx context.Context, conn net.Conn, clientAddr string, header *protocol.Header, fileBuffer []byte, finalPath string) error {
 	// Create the output file.
 	outputFile, err := os.Create(finalPath)
@@ -366,7 +416,7 @@ func handleFileTransfer(ctx context.Context, conn net.Conn, clientAddr string, h
 		return fmt.Errorf("failed to write file content: %v", err)
 	}
 
-	// Mark transfer as complete and log the final statistics.
+	// Mark the transfer as complete.
 	progressWriter.Complete()
 
 	// Verify if the bytes written are equal to the file size.
@@ -386,7 +436,7 @@ func handleFileTransfer(ctx context.Context, conn net.Conn, clientAddr string, h
 	return nil
 }
 
-// Function to read from the connection with context support.
+// Read (for contextReader) reads from the connection with context support.
 func (cr *contextReader) Read(p []byte) (n int, err error) {
 	// Check if context is cancelled before reading.
 	select {
@@ -417,10 +467,16 @@ func main() {
 			*fileStrategy, StrategyOverwrite, StrategyRename, StrategySkip)
 	}
 
+	// Validate the directory size limit flag.
+	if *maxDirectorySize == 0 {
+		log.Fatalf("Invalid directory size limit: must be greater than 0")
+	}
+
 	// Setup structured logging.
 	setupLogging()
 
 	log.Printf("Starting file transfer server...")
+	log.Printf("Directory size limit: %d bytes (%.2f GB)", *maxDirectorySize, float64(*maxDirectorySize)/1024/1024/1024)
 
 	// Create a context for graceful shutdown.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -455,6 +511,25 @@ func main() {
 	// The channel is unbuffered to ensure that the main loop only stops accepting new connections when all active connections have finished.
 	shutdownChannel := make(chan struct{})
 
+	// Launch a goroutine to periodically log directory transfer statistics.
+	// Log stats every 30 seconds.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				numClient, totalSize := getDirectoryStats()
+				if numClient > 0 {
+					log.Printf("Directory transfer stats: %d active clients, %.2f GB total",
+						numClient, float64(totalSize)/1024/1024/1024) // GB.
+				}
+			case <-shutdownChannel:
+				return
+			}
+		}
+	}()
+
 	// Launch the enclosed function as a goroutine so that it runs concurrently with the main program.
 	go func() {
 		// Receive a signal from the channel.
@@ -485,6 +560,13 @@ func main() {
 			log.Printf("All active transfers completed successfully.")
 		case <-time.After(ShutdownTimeout):
 			log.Printf("Shutdown timeout reached. Forcing shutdown...")
+		}
+
+		// Log final directory transfer statistics.
+		numClient, totalSize := getDirectoryStats()
+		if numClient > 0 {
+			log.Printf("Final directory transfer stats: %d active clients, %.2f GB total",
+				numClient, float64(totalSize)/1024/1024/1024)
 		}
 	}()
 

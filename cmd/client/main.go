@@ -42,13 +42,13 @@ var (
 	filePath   = flag.String("file", "", "File or directory to be transferred (required)")
 )
 
-// Function to configure structured logging with timestamps and custom prefix.
+// setupLogging configures structured logging with timestamps and custom prefix.
 func setupLogging() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 	log.SetPrefix(LogPrefix + " ")
 }
 
-// Function to validate command-line arguments
+// validateArgs validates command-line arguments.
 func validateArgs() error {
 	if *filePath == "" {
 		return fmt.Errorf("file path is required: use -file flag to specify the source file")
@@ -57,7 +57,7 @@ func validateArgs() error {
 	return nil
 }
 
-// Function to perform comprehensive validation of the file or directory to be sent.
+// validatePath performs comprehensive validation of the file or directory to be sent.
 func validatePath(path string) error {
 	if path == "" {
 		return fmt.Errorf("%w: path cannot be empty", ErrInvalidFilename)
@@ -87,7 +87,7 @@ func validatePath(path string) error {
 	return nil
 }
 
-// Function to read and process the server's response.
+// readServerResponse reads and processes the server's response.
 func readServerResponse(conn net.Conn) error {
 	// Set a short timeout for reading the response.
 	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
@@ -119,13 +119,13 @@ func readServerResponse(conn net.Conn) error {
 	return nil
 }
 
-// Struct to wrap a net.Conn to support context cancellation and coordination of the transfer with shutdown.
+// A contextWriter wraps a net.Conn to support context cancellation and coordination of the transfer with shutdown.
 type contextWriter struct {
 	ctx  context.Context
 	conn net.Conn
 }
 
-// Function to write to the connection with context support.
+// Write (for contextWriter) writes to the connection with context support.
 func (cw *contextWriter) Write(p []byte) (n int, err error) {
 	// Check if context is cancelled before writing.
 	select {
@@ -170,7 +170,6 @@ func main() {
 
 	isDirectory := fileInfo.IsDir()
 
-	// Log the transfer type.
 	if isDirectory {
 		log.Printf("Preparing directory transfer: %s", *filePath)
 	} else {
@@ -242,7 +241,7 @@ func main() {
 	log.Printf("Client shutting down.")
 }
 
-// Function to transfer a single file.
+// transferFile transfers a single file.
 func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath ...string) error {
 	// Open the file to send.
 	file, err := os.Open(filePath)
@@ -293,7 +292,6 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 		DirectoryPath: "",
 	}
 
-	// Log transfer start.
 	fmt.Printf("Starting file transfer: %s (%d bytes)\n", header.FileName, header.FileSize)
 
 	// Send the header first.
@@ -348,7 +346,7 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 		}
 	}
 
-	// Mark transfer as complete and log the final statistics.
+	// Mark the transfer as complete.
 	progressReader.Complete()
 
 	if transferErr != nil {
@@ -391,7 +389,7 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 	return nil
 }
 
-// Function to transfer a directory.
+// transferDirectory transfers a directory.
 func transferDirectory(ctx context.Context, dirPath string) error {
 	// Create a list of all files to transfer, including subdirectories.
 	var allFiles []string
@@ -459,8 +457,6 @@ func transferDirectory(ctx context.Context, dirPath string) error {
 			failedTransfers++
 			continue
 		}
-
-		// Log progress for directory transfer.
 		fmt.Printf("Transferring file %d/%d: %s\n", i+1, len(allFiles), relPath)
 
 		// Transfer the file with the relative path.
@@ -478,7 +474,6 @@ func transferDirectory(ctx context.Context, dirPath string) error {
 		successfulTransfers++
 	}
 
-	// Log the final directory transfer statistics.
 	log.Printf("Directory transfer completed: %s", dirPath)
 	log.Printf("Transfer summary: %d successful, %d failed, %d total bytes",
 		successfulTransfers, failedTransfers, totalBytesTransferred)
