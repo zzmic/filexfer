@@ -46,8 +46,9 @@ done
 
 # Calculate total size.
 echo "Calculating directory size..."
-total_size=$(du -sb ./large_test_dir | cut -f1)
-echo "Total directory size: $((total_size / 1024 / 1024)) MB"
+total_size=$(du -sk ./large_test_dir | cut -f1)
+total_size_bytes=$((total_size * 1024))
+echo "Total directory size: $((total_size_bytes / 1024 / 1024)) MB"
 
 # Build the applications if not already built.
 echo "Building applications..."
