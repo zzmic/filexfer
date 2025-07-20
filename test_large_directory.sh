@@ -44,13 +44,13 @@ for i in {1..5}; do
     dd if=/dev/urandom of=./large_test_dir/backup/monthly/monthly_"$i".tar.gz bs=1M count=$((RANDOM % 200 + 50)) 2>/dev/null
 done
 
-# Calculate total size.
+# Calculate the total size of the directory.
 echo "Calculating directory size..."
 total_size=$(du -sk ./large_test_dir | cut -f1)
 total_size_bytes=$((total_size * 1024))
 echo "Total directory size: $((total_size_bytes / 1024 / 1024)) MB"
 
-# Build the applications if not already built.
+# Build the applications.
 echo "Building applications..."
 go build -o ./bin/client ./cmd/client/main.go && go build -o ./bin/server ./cmd/server/main.go
 
@@ -85,9 +85,9 @@ echo "Original files: $original_count"
 echo "Transferred files: $transferred_count"
 
 if [ "$original_count" -eq "$transferred_count" ]; then
-    echo "SUCCESS: All files transferred correctly!"
+    echo "SUCCESS: All files transferred correctly (no duplicates and no missing files)"
 else
-    echo "FAILURE: File count mismatch!"
+    echo "FAILURE: File count mismatch (duplicates or missing files)"
 fi
 
 # Clean up.

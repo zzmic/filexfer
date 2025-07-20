@@ -284,11 +284,16 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 	}
 
 	// Create the header.
+	// Determine the transfer type: if this is part of a directory transfer (`relPath` provided), use `TransferTypeDirectory`.
+	transferType := uint8(protocol.TransferTypeFile)
+	if len(relPath) > 0 {
+		transferType = uint8(protocol.TransferTypeDirectory)
+	}
 	header := &protocol.Header{
 		FileSize:      uint64(statInfo.Size()),
 		FileName:      fileName,
 		Checksum:      checksum,
-		TransferType:  protocol.TransferTypeFile,
+		TransferType:  transferType,
 		DirectoryPath: "",
 	}
 
@@ -389,17 +394,59 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 	return nil
 }
 
+// validateDirectorySize validates the directory size with the server before starting transfers.
+func validateDirectorySize(totalSize int64) error {
+	// Create a connection to validate directory size.
+	conn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to connect for directory size validation: %v", err)
+	}
+	defer conn.Close()
+
+	// Set connection timeouts.
+	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
+		return fmt.Errorf("failed to set read deadline: %v", err)
+	}
+	if err := conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
+		return fmt.Errorf("failed to set write deadline: %v", err)
+	}
+
+	// Create a special header for directory size validation.
+	header := &protocol.Header{
+		FileSize:      uint64(totalSize),              // Total size of the directory.
+		FileName:      "DIRECTORY_SIZE_VALIDATION",    // Special filename for directory size validation.
+		Checksum:      make([]byte, 32),               // Empty checksum for validation.
+		TransferType:  protocol.TransferTypeDirectory, // Transfer type is directory.
+		DirectoryPath: "",                             // Empty directory path.
+	}
+
+	// Send the validation header.
+	if err := protocol.WriteHeader(conn, header); err != nil {
+		return fmt.Errorf("failed to send directory size validation header: %v", err)
+	}
+
+	// Read the server response.
+	if err := readServerResponse(conn); err != nil {
+		return fmt.Errorf("directory size validation failed: %v", err)
+	}
+
+	log.Printf("Directory size validation successful: %.2f GB", float64(totalSize)/1024/1024/1024)
+	return nil
+}
+
 // transferDirectory transfers a directory.
 func transferDirectory(ctx context.Context, dirPath string) error {
-	// Create a list of all files to transfer, including subdirectories.
 	var allFiles []string
-	// Walk the directory and add all files to the list.
+	var totalDirectorySize int64
+
+	// Walk the directory and add all files to the list, calculating the total size.
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
 			allFiles = append(allFiles, path)
+			totalDirectorySize += info.Size()
 		}
 		return nil
 	})
@@ -407,7 +454,13 @@ func transferDirectory(ctx context.Context, dirPath string) error {
 		return fmt.Errorf("failed to walk directory %s: %v", dirPath, err)
 	}
 
-	log.Printf("Found %d files to transfer in directory %s", len(allFiles), dirPath)
+	log.Printf("Found %d files to transfer in directory %s (total size: %.2f GB)",
+		len(allFiles), dirPath, float64(totalDirectorySize)/1024/1024/1024)
+
+	// Validate the directory size with the server before starting transfers.
+	if err := validateDirectorySize(totalDirectorySize); err != nil {
+		return fmt.Errorf("directory transfer rejected: %v", err)
+	}
 
 	// Track the transfer statistics.
 	var successfulTransfers, failedTransfers int

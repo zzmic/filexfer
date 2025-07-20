@@ -81,8 +81,19 @@ func validateHeader(header *protocol.Header, clientAddr string) error {
 			ErrFileTooLarge, header.FileSize, maxSize)
 	}
 
-	// Validate directory transfer size limits for directory transfers.
+	// Validate the directory transfer size limits for directory transfers.
 	if header.TransferType == protocol.TransferTypeDirectory {
+		// Check if this is a directory size validation request.
+		if header.FileName == "DIRECTORY_SIZE_VALIDATION" {
+			if header.FileSize > *maxDirectorySize {
+				return fmt.Errorf("%w: directory size %.2f GB exceeds maximum allowed size %.2f GB",
+					ErrDirectoryTooLarge, float64(header.FileSize)/1024/1024/1024, float64(*maxDirectorySize)/1024/1024/1024) // GB.
+			}
+			// Otherwise, the directory size is valid.
+			// For validation requests, there is no need to track the size or read the file content.
+			return nil
+		}
+
 		dirSizeMutex.Lock()
 		currentDirSize := directorySizes[clientAddr]
 		newTotalSize := currentDirSize + header.FileSize
@@ -243,8 +254,24 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 
 	// Validate the header.
 	if err := validateHeader(header, clientAddr); err != nil {
-		log.Printf("Invalid header from %s: %v", clientAddr, err)
-		sendErrorResponse(conn, fmt.Sprintf("Invalid file header: %v", err))
+		log.Printf("Header validation failed from %s: %v", clientAddr, err)
+		sendErrorResponse(conn, err.Error())
+		return
+	}
+
+	// Check if this is a directory size validation request.
+	if header.FileName == "DIRECTORY_SIZE_VALIDATION" {
+		log.Printf("Directory size validation request from %s: %d bytes (%.2f GB)",
+			clientAddr, header.FileSize, float64(header.FileSize)/1024/1024/1024)
+
+		// Send the success response for validation.
+		if _, err := conn.Write([]byte("Directory size validated!\n")); err != nil {
+			log.Printf("Failed to send validation response to client %s: %v", clientAddr, err)
+		}
+
+		// Log the validation duration.
+		transferDuration := time.Since(startTime)
+		log.Printf("Directory size validation completed from %s (duration: %v)", clientAddr, transferDuration)
 		return
 	}
 
@@ -368,8 +395,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 	}
 
 	// Send the success response to the client.
-	successMsg := "SUCCESS: Transfer received successfully!\n"
-	if _, err := conn.Write([]byte(successMsg)); err != nil {
+	if _, err := conn.Write([]byte("Transfer received!\n")); err != nil {
 		log.Printf("Failed to send success response to client %s: %v", clientAddr, err)
 	}
 

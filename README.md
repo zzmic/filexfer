@@ -135,7 +135,19 @@ chmod +x ./test_large_directory.sh
 ./test_large_directory.sh
 ```
 
-The large directory test script creates a large directory structure with various file sizes and types.
+The large directory test script creates a large directory structure with various file sizes and types to test performance and reliability under load.
+
+```
+# Execute the directory size limit test script.
+chmod +x ./test_directory_limit.sh
+./test_directory_limit.sh
+```
+
+The directory size limit test script specifically tests the 50GB directory size limit functionality:
+- **Test 1**: Directory transfer at/below 50GB limit (should succeed)
+- **Test 2**: Directory transfer exceeding 50GB limit (should fail)
+
+This script validates that the `-max-dir-size` parameter properly enforces directory size limits by testing both the "allow" and "reject" behaviors at the boundary.
 
 ### Test Coverage
 - **File transfers**: Various file sizes and types.
@@ -143,6 +155,7 @@ The large directory test script creates a large directory structure with various
 - **Conflict handling**: Multiple transfer strategies.
 - **Error conditions**: Invalid files, network issues.
 - **Performance**: Large file transfer timing.
+- **Size limits**: Directory size limit enforcement (50GB boundary testing).
 
 ## Development and Extensibility
 
