@@ -14,7 +14,7 @@ The utility operates through a client-server architecture:
 ## Supported Transfer Types
 
 ### Single File Transfers
-- **File validation**: Size limits (5GB), filename validation, path traversal protection.
+- **File validation**: Size limits (default 5GB), filename validation, path traversal protection.
 - **Checksum verification**: SHA256 checksums for data integrity.
 - **Progress tracking**: Real-time progress bars with transfer rates.
 - **Error handling**: Comprehensive error reporting and recovery.
@@ -44,6 +44,8 @@ The codebase is organized into modular components:
 go build -o ./bin/client ./cmd/client/main.go
 go build -o ./bin/server ./cmd/server/main.go
 ```
+
+**Note**: For easier build management, users can also use the supported `Makefile`, which includes additional targets like `make build`, `make client`, `make server`, `make clean`, and more. Run `make help` to see all available targets.
 
 ### Running the Server
 ```
@@ -159,14 +161,14 @@ This script validates that the `-max-dir-size` parameter properly enforces direc
 
 ## Development and Extensibility
 
-### Adding New Features
-- **Protocol extensions**: Extend header structure in `protocol/header.go`.
-- **Transfer types**: Add new transfer types in protocol constants in `protocol/header.go`.
-- **Conflict strategies**: Implement new strategies in server logic in `cmd/server/main.go`.
-- **Progress formats**: Customize progress display in `protocol/progress.go`.
-
 ### Debugging and Monitoring
 - **Structured logging**: Timestamped logs with component prefixes.
 - **Progress tracking**: Real-time transfer monitoring.
 - **Error reporting**: Fine-grained error reporting with context.
 - **Connection monitoring**: Connection duration and status tracking.
+
+### Adding New Features
+- **Protocol extensions**: Extend header structure in `protocol/header.go`.
+- **Transfer types**: Add new transfer types in protocol constants in `protocol/header.go`.
+- **Conflict strategies**: Implement new strategies in server logic in `cmd/server/main.go`.
+- **Progress formats**: Customize progress display in `protocol/progress.go`.
