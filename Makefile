@@ -1,66 +1,85 @@
-# Go parameters.
-GOCMD=go
-GOBUILD=$(GOCMD) build
-GOCLEAN=$(GOCMD) clean
-GOGET=$(GOCMD) get
-GOMOD=$(GOCMD) mod
+GOCMD = go
+GOBUILD = $(GOCMD) build
+GOCLEAN = $(GOCMD) clean
+GOGET = $(GOCMD) get
+GOMOD = $(GOCMD) mod
+GOFMT = $(GOCMD) fmt
+GOVET = $(GOCMD) vet
 
-# Binary names.
-BINARY_DIR=bin
-CLIENT_BINARY=$(BINARY_DIR)/client
-SERVER_BINARY=$(BINARY_DIR)/server
+LDFLAGS = -ldflags "-s -w" # For smaller binaries by stripping debug info.
+# RACE_FLAG=-race
+RACE_FLAG =
 
-# Source directories.
-CLIENT_SOURCE=./cmd/client
-SERVER_SOURCE=./cmd/server
+BINARY_DIR = bin
+CLIENT_BINARY = $(BINARY_DIR)/client
+SERVER_BINARY = $(BINARY_DIR)/server
 
-.PHONY: all build client server clean deps tidy install uninstall run-client run-server test test-sh test-large-directory-sh test-directory-limit-sh help
+CLIENT_SOURCE = ./cmd/client
+SERVER_SOURCE = ./cmd/server
 
-# Default target.
-all: build
+TEST_SCRIPTS = test.sh test_large_directory.sh test_directory_limit.sh
 
-# Build both client and server.
+RESET = \033[0m
+GREEN = \033[32m
+YELLOW = \033[33m
+CYAN = \033[36m
+
+.PHONY: all build client server clean deps tidy fmt vet lint install uninstall run-client run-server test-all test-sh test-large-directory-sh test-directory-limit-sh help
+
+all: fmt vet build
+
 build: client server
 
-# Build client.
 client: $(CLIENT_BINARY)
 
 $(CLIENT_BINARY): $(CLIENT_SOURCE)/*.go protocol/*.go
+	@echo "$(CYAN)Building client binary...$(RESET)"
 	@mkdir -p $(BINARY_DIR)
-	$(GOBUILD) -o $(CLIENT_BINARY) $(CLIENT_SOURCE)
+	$(GOBUILD) $(LDFLAGS) $(RACE_FLAG) -o $(CLIENT_BINARY) $(CLIENT_SOURCE)
+	@echo "$(GREEN)Client binary built at $(CLIENT_BINARY)$(RESET)"
 
-# Build server.
 server: $(SERVER_BINARY)
 
 $(SERVER_BINARY): $(SERVER_SOURCE)/*.go protocol/*.go
+	@echo "$(CYAN)Building server binary...$(RESET)"
 	@mkdir -p $(BINARY_DIR)
-	$(GOBUILD) -o $(SERVER_BINARY) $(SERVER_SOURCE)
+	$(GOBUILD) $(LDFLAGS) $(RACE_FLAG) -o $(SERVER_BINARY) $(SERVER_SOURCE)
+	@echo "$(GREEN)Server binary built at $(SERVER_BINARY)$(RESET)"
 
-# Clean build artifacts.
+fmt:
+	@echo "$(YELLOW)Formatting code...$(RESET)"
+	$(GOFMT) ./...
+
+vet:
+	@echo "$(YELLOW)Vetting code...$(RESET)"
+	$(GOVET) ./...
+
 clean:
+	@echo "$(YELLOW)Cleaning build artifacts...$(RESET)"
 	$(GOCLEAN)
-	rm -rf $(BINARY_DIR)
+	rm -r $(BINARY_DIR)/*
+	@echo "$(GREEN)Clean complete.$(RESET)"
 
-# Download dependencies.
 deps:
+	@echo "$(CYAN)Downloading dependencies...$(RESET)"
 	$(GOMOD) tidy
 	$(GOMOD) download
 
-# Tidy modules.
 tidy:
 	$(GOMOD) tidy
 
-# Install binaries to `GOPATH/bin`.
 install: build
+	@echo "$(CYAN)Installing binaries to GOPATH...$(RESET)"
 	$(GOCMD) install $(CLIENT_SOURCE)
 	$(GOCMD) install $(SERVER_SOURCE)
+	@echo "$(GREEN)Installation complete.$(RESET)"
 
-# Uninstall binaries from `GOPATH/bin`.
 uninstall:
-	rm $(GOPATH)/bin/client
-	rm $(GOPATH)/bin/server
+	@echo "$(YELLOW)Uninstalling binaries...$(RESET)"
+	rm -f $(GOPATH)/bin/client
+	rm -f $(GOPATH)/bin/server
+	@echo "$(GREEN)Uninstalled.$(RESET)"
 
-# Run client or server with optional arguments.
 ARGS ?=
 
 run-client: client
@@ -69,14 +88,12 @@ run-client: client
 run-server: server
 	./$(SERVER_BINARY) $(ARGS)
 
-# Run all tests.
-test:
-	chmod +x test.sh test_large_directory.sh test_directory_limit.sh
+test-all:
+	chmod +x ${TEST_SCRIPTS}
 	./test.sh
 	./test_large_directory.sh
 	./test_directory_limit.sh
 
-# Run `test.sh`.
 test-sh:
 	chmod +x test.sh
 	./test.sh
@@ -93,20 +110,27 @@ test-directory-limit-sh:
 
 # Help target.
 help:
-	@echo "Available targets:"
-	@echo "  all        - Build both client and server (default)"
-	@echo "  build      - Build both client and server"
-	@echo "  client     - Build client binary"
-	@echo "  server     - Build server binary"
-	@echo "  clean      - Remove build artifacts"
-	@echo "  deps       - Download dependencies"
-	@echo "  tidy       - Tidy module dependencies"
-	@echo "  install    - Install binaries to GOPATH/bin"
-	@echo "  uninstall  - Uninstall binaries from GOPATH/bin"
-	@echo "  run-client - Build and run client"
-	@echo "  run-server - Build and run server"
-	@echo "  test       - Run all tests"
-	@echo "  test-sh    - Run test.sh"
-	@echo "  test-large-directory-sh - Run test_large_directory.sh"
-	@echo "  test-directory-limit-sh - Run test_directory_limit.sh"
-	@echo "  help       - Show this help message"
+	@echo 'Usage: make <target> [VAR=value]'
+	@echo
+	@echo 'Common variables:'
+	@printf '  %-30s %s\n' 'ARGS' 'Arguments for run-client/run-server (e.g. ARGS="-port 9090")'
+	@echo
+	@echo 'Targets:'
+	@printf '  %-30s %s\n' 'all' 'Format, vet, and build both client and server.'
+	@printf '  %-30s %s\n' 'build' 'Build both client and server binaries.'
+	@printf '  %-30s %s\n' 'client' 'Build the client binary.'
+	@printf '  %-30s %s\n' 'server' 'Build the server binary.'
+	@printf '  %-30s %s\n' 'fmt' 'Format the code using gofmt.'
+	@printf '  %-30s %s\n' 'vet' 'Vet the code using govet.'
+	@printf '  %-30s %s\n' 'clean' 'Clean build artifacts.'
+	@printf '  %-30s %s\n' 'deps' 'Download project dependencies.'
+	@printf '  %-30s %s\n' 'tidy' 'Tidy up go.mod and go.sum files.'
+	@printf '  %-30s %s\n' 'install' 'Install client and server binaries to GOPATH/bin.'
+	@printf '  %-30s %s\n' 'uninstall' 'Uninstall client and server binaries from GOPATH/bin.'
+	@printf '  %-30s %s\n' 'run-client' 'Run the client binary with optional ARGS.'
+	@printf '  %-30s %s\n' 'run-server' 'Run the server binary with optional ARGS.'
+	@printf '  %-30s %s\n' 'test' 'Run all test scripts.'
+	@printf '  %-30s %s\n' 'test-sh' 'Run test.sh script.'
+	@printf '  %-30s %s\n' 'test-large-directory-sh' 'Run test_large_directory.sh script.'
+	@printf '  %-30s %s\n' 'test-directory-limit-sh' 'Run test_directory_limit.sh script.'
+	@printf '  %-30s %s\n' 'help' 'Show this help message.'
