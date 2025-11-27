@@ -1,7 +1,7 @@
 # filexfer
 
 ## Overview
-This project is a multi-threaded file transfer application written in Go that supports both single-file and directory transfers over TCP connections. The application implements a custom binary protocol with user-friendly features, including SHA256 checksums, progress tracking, and configurable conflict resolution strategies.
+This project is a multi-threaded file transfer application written in Go that supports both single-file and directory transfers over TCP connections. The application implements a custom binary protocol with user-friendly features, including SHA-256 checksums, progress tracking, and configurable conflict-resolution strategies.
 
 The utility operates through a client-server architecture:
 
@@ -84,9 +84,10 @@ The binary protocol uses a fixed-size header (329 bytes) containing:
 ### Transfer Process
 1. **Header transmission**: Client sends transfer header with metadata.
 2. **Data transfer**: File/directory content with progress tracking.
-3. **Verification**: Server validates checksums and file integrity.
-4. **Conflict resolution**: Applies configured strategy (overwrite/rename/skip).
-5. **Response**: Server sends success/error response to client.
+3. **Streaming architecture**: Server streams data directly to disk while calculating checksums on-the-fly (memory-efficient, no full-file buffering).
+4. **Verification**: Server validates checksums and file integrity after transfer completes.
+5. **Conflict resolution**: Applies configured strategy (overwrite/rename/skip).
+6. **Response**: Server sends success/error response to client.
 
 ## Features
 
@@ -94,7 +95,7 @@ The binary protocol uses a fixed-size header (329 bytes) containing:
 - **Path traversal protection**: Prevents path traversal attacks.
 - **Size limits**: Configurable maximum file (5GB) and directory (default 50GB) sizes.
 - **Per-client directory limits**: Individual client directory transfer size tracking and validation.
-- **Checksum verification**: SHA256 checksums for data integrity.
+- **Checksum verification**: SHA256 checksums calculated during transfer and verified after completion; corrupted files are automatically deleted.
 - **Input validation**: Comprehensive filename and path validation.
 
 ### Progress Tracking
@@ -108,11 +109,18 @@ The binary protocol uses a fixed-size header (329 bytes) containing:
 - **Rename**: Append numeric suffix to avoid conflicts.
 - **Skip**: Skip files that already exist.
 
+### Performance and Scalability
+- **Memory-efficient streaming**: Files are streamed directly to disk without loading entire files into RAM, enabling efficient handling of large files (up to 5GB) and multiple concurrent transfers.
+- **On-the-fly checksum calculation**: SHA256 checksums are calculated during transfer using `io.TeeReader`, eliminating the need for double-pass file reading.
+- **Concurrent transfers**: Server handles multiple client connections simultaneously using goroutines, with per-client resource tracking.
+- **Scalable architecture**: Designed to handle large files and high concurrency without memory exhaustion.
+
 ### Error Handling
 - **Graceful shutdown**: Context-based cancellation support.
 - **Connection timeouts**: Configurable read/write timeouts.
 - **Comprehensive logging**: Structured logging with timestamps.
 - **Error recovery**: Detailed error messages and recovery.
+- **Corrupted file cleanup**: Automatically deletes files with checksum mismatches to prevent disk space waste.
 
 ## Testing
 

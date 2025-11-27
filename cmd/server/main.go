@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"filexfer/protocol"
 	"flag"
@@ -264,7 +266,6 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		log.Printf("Directory size validation request from %s: %d bytes (%.2f GB)",
 			clientAddr, header.FileSize, float64(header.FileSize)/1024/1024/1024)
 
-		// Send the success response for validation.
 		if _, err := conn.Write([]byte("Directory size validated!\n")); err != nil {
 			log.Printf("Failed to send validation response to client %s: %v", clientAddr, err)
 		}
@@ -331,27 +332,33 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		return
 	}
 
-	// Close the output file when the surrounding function exits.
 	defer func() {
 		if err := outputFile.Close(); err != nil {
 			log.Printf("Error closing output file %s: %v", finalPath, err)
 		}
 	}()
 
-	// Read the file content into a buffer for verification.
+	// Stream file content directly to disk while calculating checksum on the fly.
 	log.Printf("Receiving file content from %s...", clientAddr)
 
-	// Create a buffer to hold the entire file content for verification.
-	fileBuffer := make([]byte, header.FileSize)
-
-	// Create a context-aware reader that can be interrupted during shutdown.
+	// Create a context reader that can be interrupted during shutdown.
 	ctxReader := &contextReader{
 		ctx:  ctx,
 		conn: conn,
 	}
 
-	// Read the entire file content into the buffer.
-	_, err = io.ReadFull(ctxReader, fileBuffer)
+	// Create a `LimitReader` to prevent reading past the specified file size.
+	limitReader := io.LimitReader(ctxReader, int64(header.FileSize))
+
+	// Create a `TeeReader` that reads from network and writes to hash while returning data to be copied to file.
+	hasher := sha256.New()
+	teeReader := io.TeeReader(limitReader, hasher)
+
+	// Create a `ProgressWriter` to track transfer progress.
+	progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Receiving %s", header.FileName))
+
+	// Stream file content directly to disk while calculating checksum on the fly.
+	bytesWritten, err := io.Copy(progressWriter, teeReader)
 	if err != nil {
 		log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
 		if errors.Is(err, io.EOF) {
@@ -363,28 +370,46 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		if ctx.Err() != nil {
 			log.Printf("Transfer interrupted due to server shutdown: %v", ctx.Err())
 		}
-		// Fallback to a generic message.
+		// Clean up the partial file.
+		if err := os.Remove(finalPath); err != nil {
+			log.Printf("Failed to remove partial file %s: %v", finalPath, err)
+		}
 		sendErrorResponse(conn, "Failed to receive file content")
 		return
 	}
 
-	// Verify the data checksum before writing to disk.
+	// Verify that we received the expected number of bytes.
+	if bytesWritten != int64(header.FileSize) {
+		log.Printf("File size mismatch for client %s: expected %d, received %d",
+			clientAddr, header.FileSize, bytesWritten)
+		// Clean up the partial file.
+		if err := os.Remove(finalPath); err != nil {
+			log.Printf("Failed to remove incomplete file %s: %v", finalPath, err)
+		}
+		sendErrorResponse(conn, "File size mismatch")
+		return
+	}
+
+	progressWriter.Complete()
+
+	// Verify the checksum of the received file content.
 	log.Printf("Verifying received data integrity...")
-	if err := protocol.VerifyDataChecksum(fileBuffer, header.Checksum); err != nil {
-		log.Printf("Data checksum verification failed for client %s: %v", clientAddr, err)
+	calculatedChecksum := hasher.Sum(nil)
+	if !bytes.Equal(calculatedChecksum, header.Checksum) {
+		log.Printf("Data checksum verification failed for client %s: expected %x, got %x",
+			clientAddr, header.Checksum, calculatedChecksum)
+		// Delete the corrupted file immediately.
+		if err := os.Remove(finalPath); err != nil {
+			log.Printf("Failed to remove corrupted file %s: %v", finalPath, err)
+		}
 		sendErrorResponse(conn, "Data integrity check failed")
 		return
 	}
-	log.Printf("Data checksum verification successful")
+	log.Printf("Data checksum verification passed")
 
-	// Handle single file transfer (directories are now handled as individual files).
-	if err := handleFileTransfer(ctx, conn, clientAddr, header, fileBuffer, finalPath); err != nil {
-		log.Printf("Failed to handle file transfer from %s: %v", clientAddr, err)
-		sendErrorResponse(conn, fmt.Sprintf("Failed to handle file transfer: %v", err))
-		return
-	}
+	log.Printf("File integrity verified for %s", header.FileName)
 
-	// Update directory size tracking for successful directory transfers.
+	// Update directory size tracking for directory transfers.
 	if header.TransferType == protocol.TransferTypeDirectory {
 		dirSizeMutex.Lock()
 		directorySizes[clientAddr] += header.FileSize
@@ -394,72 +419,12 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 			clientAddr, currentTotal, float64(currentTotal)/1024/1024/1024)
 	}
 
-	// Send the success response to the client.
 	if _, err := conn.Write([]byte("Transfer received!\n")); err != nil {
 		log.Printf("Failed to send success response to client %s: %v", clientAddr, err)
 	}
 
 	transferDuration := time.Since(startTime)
 	log.Printf("Transfer completed from %s (duration: %v)", clientAddr, transferDuration)
-}
-
-// handleFileTransfer handles the transfer of a single file.
-func handleFileTransfer(ctx context.Context, conn net.Conn, clientAddr string, header *protocol.Header, fileBuffer []byte, finalPath string) error {
-	// Create the output file.
-	outputFile, err := os.Create(finalPath)
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %v", err)
-	}
-
-	// Close the output file when the surrounding function exits.
-	defer func() {
-		if err := outputFile.Close(); err != nil {
-			log.Printf("Error closing output file %s: %v", finalPath, err)
-		}
-	}()
-
-	// Write the verified buffer to disk with progress tracking.
-	progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Writing %s", header.FileName))
-	bytesWritten, err := progressWriter.Write(fileBuffer)
-	if err != nil {
-		log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
-		if errors.Is(err, io.EOF) {
-			log.Printf("Client %s disconnected during file transfer", clientAddr)
-		}
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			log.Printf("Client %s sent incomplete file data", clientAddr)
-		}
-		if ctx.Err() != nil {
-			log.Printf("Transfer interrupted due to server shutdown: %v", ctx.Err())
-		}
-		// Fallback to a generic message.
-		sendErrorResponse(conn, "Failed to receive file content")
-
-		// Clean up the incomplete file.
-		if err := os.Remove(finalPath); err != nil {
-			log.Printf("Failed to remove partial file %s: %v", finalPath, err)
-		}
-		return fmt.Errorf("failed to write file content: %v", err)
-	}
-
-	// Mark the transfer as complete.
-	progressWriter.Complete()
-
-	// Verify if the bytes written are equal to the file size.
-	if bytesWritten != len(fileBuffer) {
-		log.Printf("File size mismatch for client %s: expected %d, received %d",
-			clientAddr, len(fileBuffer), bytesWritten)
-		sendErrorResponse(conn, "File size mismatch")
-		// Clean up the incomplete file.
-		if err := os.Remove(finalPath); err != nil {
-			log.Printf("Failed to remove incomplete file %s: %v", finalPath, err)
-		}
-		return fmt.Errorf("file size mismatch: expected %d, received %d", len(fileBuffer), bytesWritten)
-	}
-
-	// File data integrity verified successfully.
-	log.Printf("File integrity verified for %s", header.FileName)
-	return nil
 }
 
 // Read (for contextReader) reads from the connection with context support.
@@ -514,7 +479,6 @@ func main() {
 		log.Fatalf("Failed to start listening for incoming connections: %v", err)
 	}
 
-	// Close the listener when the surrounding function exits.
 	defer func() {
 		if err := listener.Close(); err != nil {
 			log.Printf("Error closing listener: %v", err)
@@ -583,7 +547,7 @@ func main() {
 		}()
 		select {
 		case <-doneChannel:
-			log.Printf("All active transfers completed successfully.")
+			log.Printf("All active transfers completed.")
 		case <-time.After(ShutdownTimeout):
 			log.Printf("Shutdown timeout reached. Forcing shutdown...")
 		}
