@@ -23,14 +23,14 @@ func CalculateFileChecksum(file io.Reader) ([]byte, error) {
 	return checksum, nil
 }
 
-// CalculateDataChecksum calculates the SHA256 checksum of data and returns it as a byte slice.
+// CalculateDataChecksum calculates the SHA-256 checksum of data and returns it as a byte slice.
 func CalculateDataChecksum(data []byte) []byte {
 	hash := sha256.New()
 	hash.Write(data)
 	return hash.Sum(nil)
 }
 
-// VerifyDataChecksum verifies the SHA256 checksum of data.
+// VerifyDataChecksum verifies the SHA-256 checksum of data.
 func VerifyDataChecksum(data []byte, expectedChecksum []byte) error {
 	if expectedChecksum == nil {
 		return fmt.Errorf("expected checksum is nil")

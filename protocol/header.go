@@ -8,12 +8,14 @@ import (
 	"strings"
 )
 
-// Constants to represent the header size and the maximum file name size.
+// Constants for protocol limits and sizes.
 const (
-	HeaderSize   = 8 + 256 + 32 + 1 + 256 // 329 bytes for the header (8 bytes for file size + 256 bytes for file name + 32 bytes for SHA256 checksum + 1 byte for transfer type + 256 bytes for directory path).
-	FileNameSize = 256                    // 256 bytes for the file name.
-	ChecksumSize = 32                     // 32 bytes for SHA256 checksum (hexadecimal representation in string).
-	DirPathSize  = 256                    // 256 bytes for directory path.
+	// ChecksumSize is the fixed size for SHA-256 checksum (32 bytes).
+	ChecksumSize = 32
+	// MaxFileNameLength is the maximum allowed file name length (64KB).
+	MaxFileNameLength = 64 * 1024
+	// MaxDirPathLength is the maximum allowed directory path length (64KB).
+	MaxDirPathLength = 64 * 1024
 )
 
 // Constants to represent the transfer types.
@@ -24,13 +26,13 @@ const (
 
 // Custom error types for protocol errors.
 var (
-	ErrInvalidHeaderSize    = errors.New("invalid header size in header")
 	ErrInvalidFileSize      = errors.New("invalid file size in header")
 	ErrInvalidFileName      = errors.New("invalid filename in header")
-	ErrHeaderTooLarge       = errors.New("header size exceeds maximum allowed size in header")
+	ErrFileNameTooLong      = errors.New("filename length exceeds maximum allowed size")
 	ErrInvalidChecksum      = errors.New("invalid checksum in header")
 	ErrChecksumMismatch     = errors.New("checksum mismatch in header")
 	ErrInvalidDirectoryPath = errors.New("invalid directory path in header")
+	ErrDirectoryPathTooLong = errors.New("directory path length exceeds maximum allowed size")
 	ErrInvalidTransferType  = errors.New("invalid transfer type in header")
 )
 
@@ -38,7 +40,7 @@ var (
 type Header struct {
 	FileSize      uint64 // Size of the file or directory in bytes.
 	FileName      string // Name of the file or directory.
-	Checksum      []byte // SHA256 checksum of the file or directory.
+	Checksum      []byte // SHA-256 checksum of the file or directory.
 	TransferType  uint8  // Transfer type (0 for single file, 1 for directory).
 	DirectoryPath string // Path of the directory (only used for directory transfers).
 }
@@ -53,9 +55,9 @@ func validateHeader(header *Header) error {
 		return fmt.Errorf("%w: filename cannot be empty", ErrInvalidFileName)
 	}
 
-	if len(header.FileName) > FileNameSize {
+	if len(header.FileName) > MaxFileNameLength {
 		return fmt.Errorf("%w: filename length %d exceeds maximum %d",
-			ErrInvalidFileName, len(header.FileName), FileNameSize)
+			ErrFileNameTooLong, len(header.FileName), MaxFileNameLength)
 	}
 
 	if strings.ContainsRune(header.FileName, 0) {
@@ -76,15 +78,15 @@ func validateHeader(header *Header) error {
 			ErrInvalidTransferType, header.TransferType, TransferTypeFile, TransferTypeDirectory)
 	}
 
-	if header.TransferType == TransferTypeDirectory && len(header.DirectoryPath) > DirPathSize {
+	if header.TransferType == TransferTypeDirectory && len(header.DirectoryPath) > MaxDirPathLength {
 		return fmt.Errorf("%w: directory path length %d exceeds maximum %d",
-			ErrInvalidDirectoryPath, len(header.DirectoryPath), DirPathSize)
+			ErrDirectoryPathTooLong, len(header.DirectoryPath), MaxDirPathLength)
 	}
 
 	return nil
 }
 
-// WriteHeader writes the header to the given writer.
+// WriteHeader writes the header to the given writer using length-prefixed format.
 func WriteHeader(w io.Writer, header *Header) error {
 	if w == nil {
 		return fmt.Errorf("writer is nil")
@@ -94,138 +96,153 @@ func WriteHeader(w io.Writer, header *Header) error {
 		return fmt.Errorf("invalid header for writing: %w", err)
 	}
 
-	// Write the file size as 8 bytes in the big-endian format.
-	sizeBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(sizeBytes, header.FileSize)
-
-	// Write the file size to the writer.
-	n, err := w.Write(sizeBytes)
-	if err != nil {
+	// Write the file size as 8 bytes in big-endian format.
+	if err := binary.Write(w, binary.BigEndian, header.FileSize); err != nil {
 		return fmt.Errorf("failed to write file size: %w", err)
 	}
-	if n != 8 {
-		return fmt.Errorf("incomplete write of file size: wrote %d bytes, expected 8", n)
+
+	// Write the file name length as 4 bytes in big-endian format, followed by the file name.
+	fileNameBytes := []byte(header.FileName)
+	fileNameLength := uint32(len(fileNameBytes))
+	if err := binary.Write(w, binary.BigEndian, fileNameLength); err != nil {
+		return fmt.Errorf("failed to write filename length: %w", err)
 	}
-
-	// Write the file name as fixed-size bytes (pad with zeros if shorter than the maximum file name size).
-	fileNameBytes := make([]byte, FileNameSize)
-	copy(fileNameBytes, []byte(header.FileName))
-
-	// Write the file name to the writer.
-	n, err = w.Write(fileNameBytes)
-	if err != nil {
+	if _, err := w.Write(fileNameBytes); err != nil {
 		return fmt.Errorf("failed to write filename: %w", err)
 	}
-	if n != FileNameSize {
-		return fmt.Errorf("incomplete write of filename: wrote %d bytes, expected %d", n, FileNameSize)
+
+	// Write the checksum as fixed-size bytes (32 bytes for SHA-256).
+	if len(header.Checksum) != ChecksumSize {
+		return fmt.Errorf("invalid checksum size: expected %d, got %d", ChecksumSize, len(header.Checksum))
 	}
-
-	// Write the checksum as fixed-size bytes.
-	checksumBytes := make([]byte, ChecksumSize)
-	copy(checksumBytes, header.Checksum)
-
-	// Write the checksum to the writer.
-	n, err = w.Write(checksumBytes)
-	if err != nil {
+	if _, err := w.Write(header.Checksum); err != nil {
 		return fmt.Errorf("failed to write checksum: %w", err)
-	}
-	if n != ChecksumSize {
-		return fmt.Errorf("incomplete write of checksum: wrote %d bytes, expected %d", n, ChecksumSize)
 	}
 
 	// Write the transfer type as a single byte.
-	transferTypeBytes := []byte{header.TransferType}
-	n, err = w.Write(transferTypeBytes)
-	if err != nil {
+	if _, err := w.Write([]byte{header.TransferType}); err != nil {
 		return fmt.Errorf("failed to write transfer type: %w", err)
 	}
-	if n != 1 {
-		return fmt.Errorf("incomplete write of transfer type: wrote %d bytes, expected 1", n)
+
+	// Write the directory path length as 4 bytes in big-endian format, followed by the directory path.
+	dirPathBytes := []byte(header.DirectoryPath)
+	dirPathLength := uint32(len(dirPathBytes))
+	if err := binary.Write(w, binary.BigEndian, dirPathLength); err != nil {
+		return fmt.Errorf("failed to write directory path length: %w", err)
 	}
-
-	// Write the directory path as fixed-size bytes (pad with zeros if shorter than the maximum directory path size).
-	dirPathBytes := make([]byte, DirPathSize)
-	copy(dirPathBytes, []byte(header.DirectoryPath))
-
-	// Write the directory path to the writer.
-	n, err = w.Write(dirPathBytes)
-	if err != nil {
+	if _, err := w.Write(dirPathBytes); err != nil {
 		return fmt.Errorf("failed to write directory path: %w", err)
-	}
-	if n != DirPathSize {
-		return fmt.Errorf("incomplete write of directory path: wrote %d bytes, expected %d", n, DirPathSize)
 	}
 
 	return nil
 }
 
-// Function to read the header from the given reader.
+// ReadHeader reads the header from the given reader using length-prefixed format.
 func ReadHeader(r io.Reader) (*Header, error) {
 	if r == nil {
 		return nil, fmt.Errorf("reader is nil")
 	}
 
-	// Read the entire header into a buffer (in bytes).
-	headerBytes := make([]byte, HeaderSize)
-	// Read the header from the reader.
-	n, err := io.ReadFull(r, headerBytes)
-	if err != nil {
+	// Read the file size (8 bytes, big-endian).
+	var fileSize uint64
+	if err := binary.Read(r, binary.BigEndian, &fileSize); err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("unexpected end of stream while reading header: %w", err)
+			return nil, fmt.Errorf("unexpected end of stream while reading file size: %w", err)
 		}
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, fmt.Errorf("incomplete header read: got %d bytes, expected %d: %w",
-				n, HeaderSize, err)
+		return nil, fmt.Errorf("failed to read file size: %w", err)
+	}
+
+	// Read the file name length (4 bytes, big-endian).
+	var fileNameLength uint32
+	if err := binary.Read(r, binary.BigEndian, &fileNameLength); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("unexpected end of stream while reading filename length: %w", err)
 		}
-		return nil, fmt.Errorf("failed to read header: %w", err)
-	}
-	if n != HeaderSize {
-		return nil, fmt.Errorf("%w: read %d bytes, expected %d", ErrInvalidHeaderSize, n, HeaderSize)
+		return nil, fmt.Errorf("failed to read filename length: %w", err)
 	}
 
-	// Extract the file size (first 8 bytes in the big-endian format).
-	fileSize := binary.BigEndian.Uint64(headerBytes[:8])
+	// Validate file name length to prevent abuse.
+	if fileNameLength > MaxFileNameLength {
+		return nil, fmt.Errorf("%w: filename length %d exceeds maximum %d",
+			ErrFileNameTooLong, fileNameLength, MaxFileNameLength)
+	}
 
-	// Extract the file name (next 256 bytes, trim null bytes).
-	// The file name is stored in the next 256 bytes of the header.
-	fileNameBytes := headerBytes[8 : 8+FileNameSize]
-
-	// Find the first null byte and trim from there.
-	fileName := ""
-	for i, b := range fileNameBytes {
-		if b == 0 {
-			fileName = string(fileNameBytes[:i])
-			break
+	// Read the file name (variable length).
+	fileNameBytes := make([]byte, fileNameLength)
+	if fileNameLength > 0 {
+		n, err := io.ReadFull(r, fileNameBytes)
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, fmt.Errorf("unexpected end of stream while reading filename: got %d bytes, expected %d: %w",
+					n, fileNameLength, err)
+			}
+			return nil, fmt.Errorf("failed to read filename: %w", err)
 		}
-	}
-
-	// If no null byte found, use the entire file name field.
-	if fileName == "" {
-		fileName = string(fileNameBytes)
-	}
-
-	// Extract the checksum (next 32 bytes, trim null bytes).
-	checksumBytes := headerBytes[8+FileNameSize : 8+FileNameSize+ChecksumSize]
-
-	// Extract the transfer type (next 1 byte).
-	transferType := headerBytes[8+FileNameSize+ChecksumSize]
-
-	// Extract the directory path (next 256 bytes, trim null bytes).
-	directoryPathBytes := headerBytes[8+FileNameSize+ChecksumSize+1 : 8+FileNameSize+ChecksumSize+1+DirPathSize]
-
-	// Find the first null byte and trim from there.
-	dirPath := ""
-	for i, b := range directoryPathBytes {
-		if b == 0 {
-			dirPath = string(directoryPathBytes[:i])
-			break
+		if n != int(fileNameLength) {
+			return nil, fmt.Errorf("incomplete filename read: got %d bytes, expected %d", n, fileNameLength)
 		}
 	}
+	fileName := string(fileNameBytes)
 
-	// If no null byte found, use the entire directory path field.
-	if dirPath == "" {
-		dirPath = string(directoryPathBytes)
+	// Read the checksum (32 bytes, fixed size).
+	checksumBytes := make([]byte, ChecksumSize)
+	n, err := io.ReadFull(r, checksumBytes)
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("unexpected end of stream while reading checksum: got %d bytes, expected %d: %w",
+				n, ChecksumSize, err)
+		}
+		return nil, fmt.Errorf("failed to read checksum: %w", err)
 	}
+	if n != ChecksumSize {
+		return nil, fmt.Errorf("incomplete checksum read: got %d bytes, expected %d", n, ChecksumSize)
+	}
+
+	// Read the transfer type (1 byte).
+	transferTypeBytes := make([]byte, 1)
+	n, err = io.ReadFull(r, transferTypeBytes)
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("unexpected end of stream while reading transfer type: %w", err)
+		}
+		return nil, fmt.Errorf("failed to read transfer type: %w", err)
+	}
+	if n != 1 {
+		return nil, fmt.Errorf("incomplete transfer type read: got %d bytes, expected 1", n)
+	}
+	transferType := transferTypeBytes[0]
+
+	// Read the directory path length (4 bytes, big-endian).
+	var dirPathLength uint32
+	if err := binary.Read(r, binary.BigEndian, &dirPathLength); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("unexpected end of stream while reading directory path length: %w", err)
+		}
+		return nil, fmt.Errorf("failed to read directory path length: %w", err)
+	}
+
+	// Validate directory path length to prevent abuse.
+	if dirPathLength > MaxDirPathLength {
+		return nil, fmt.Errorf("%w: directory path length %d exceeds maximum %d",
+			ErrDirectoryPathTooLong, dirPathLength, MaxDirPathLength)
+	}
+
+	// Read the directory path (variable length).
+	dirPathBytes := make([]byte, dirPathLength)
+	if dirPathLength > 0 {
+		n, err = io.ReadFull(r, dirPathBytes)
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, fmt.Errorf("unexpected end of stream while reading directory path: got %d bytes, expected %d: %w",
+					n, dirPathLength, err)
+			}
+			return nil, fmt.Errorf("failed to read directory path: %w", err)
+		}
+		if n != int(dirPathLength) {
+			return nil, fmt.Errorf("incomplete directory path read: got %d bytes, expected %d", n, dirPathLength)
+		}
+	}
+	dirPath := string(dirPathBytes)
 
 	// Create and validate the header.
 	header := &Header{
