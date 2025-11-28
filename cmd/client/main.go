@@ -226,16 +226,9 @@ func main() {
 		log.Fatalf("Failed to set write deadline: %v", err)
 	}
 
-	if isDirectory {
-		// Handle directory transfer.
-		if err := transferDirectory(ctx, *filePath); err != nil {
-			log.Fatalf("Directory transfer failed: %v", err)
-		}
-	} else {
-		// Handle single file transfer.
-		if err := transferFile(ctx, conn, *filePath); err != nil {
-			log.Fatalf("File transfer failed: %v", err)
-		}
+	// Handle single file transfer.
+	if err := transferFile(ctx, conn, *filePath); err != nil {
+		log.Fatalf("File transfer failed: %v", err)
 	}
 
 	log.Printf("Client shutting down.")
@@ -466,7 +459,32 @@ func transferDirectory(ctx context.Context, dirPath string) error {
 	var successfulTransfers, failedTransfers int
 	var totalBytesTransferred int64
 
-	// Transfer each file individually using separate connections.
+	// Establish a single persistent connection for the entire directory transfer.
+	log.Printf("Establishing persistent connection for directory transfer...")
+	fileConn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to establish connection for directory transfer: %v", err)
+	}
+
+	// Ensure connection is closed when done.
+	defer func() {
+		if err := fileConn.Close(); err != nil {
+			log.Printf("Error closing directory transfer connection: %v", err)
+		}
+		log.Printf("Directory transfer connection closed")
+	}()
+
+	// Set connection timeouts for the persistent connection.
+	if err := fileConn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
+		return fmt.Errorf("failed to set read deadline: %v", err)
+	}
+	if err := fileConn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
+		return fmt.Errorf("failed to set write deadline: %v", err)
+	}
+
+	log.Printf("Persistent connection established. Transferring %d files on the same connection...", len(allFiles))
+
+	// Transfer each file using the same persistent connection.
 	for i, filePath := range allFiles {
 		// Check if the context is cancelled.
 		select {
@@ -476,22 +494,7 @@ func transferDirectory(ctx context.Context, dirPath string) error {
 		default:
 		}
 
-		// Create a new connection for each file to avoid protocol issues.
-		fileConn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
-		if err != nil {
-			log.Printf("Failed to connect for file %s: %v", filePath, err)
-			failedTransfers++
-			continue
-		}
-
-		// Ensure connection is closed in all cases.
-		defer func(conn net.Conn, path string) {
-			if err := conn.Close(); err != nil {
-				log.Printf("Error closing connection for %s: %v", path, err)
-			}
-		}(fileConn, filePath)
-
-		// Set connection timeouts.
+		// Refresh connection timeouts for each file transfer.
 		if err := fileConn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
 			log.Printf("Failed to set read deadline for file %s: %v", filePath, err)
 			failedTransfers++
@@ -512,11 +515,16 @@ func transferDirectory(ctx context.Context, dirPath string) error {
 		}
 		fmt.Printf("Transferring file %d/%d: %s\n", i+1, len(allFiles), relPath)
 
-		// Transfer the file with the relative path.
+		// Transfer the file with the relative path using the persistent connection.
 		// The `transferFile` function will then handle the file transfer with the relative path instead of the plain file name.
 		if err := transferFile(ctx, fileConn, filePath, relPath); err != nil {
 			log.Printf("Failed to transfer file %s: %v", filePath, err)
 			failedTransfers++
+			// If connection error, break the loop since the connection is likely dead.
+			if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "connection") {
+				log.Printf("Connection error detected, aborting remaining transfers")
+				break
+			}
 			continue
 		}
 

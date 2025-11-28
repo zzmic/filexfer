@@ -238,193 +238,212 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		return
 	}
 
-	// Read the file transfer header.
-	header, err := protocol.ReadHeader(conn)
-	if err != nil {
-		log.Printf("Failed to read file transfer header from %s: %v", clientAddr, err)
-
-		// Create an error message with the error details.
-		errorMsg := "Failed to read file transfer header: " + err.Error()
-
-		// Send the error response to the client.
-		// Only send error response if connection is still valid.
-		if !errors.Is(err, io.EOF) {
-			sendErrorResponse(conn, errorMsg)
-		}
-		return
-	}
-
-	// Validate the header.
-	if err := validateHeader(header, clientAddr); err != nil {
-		log.Printf("Header validation failed from %s: %v", clientAddr, err)
-		sendErrorResponse(conn, err.Error())
-		return
-	}
-
-	// Check if this is a directory size validation request.
-	if header.FileName == "DIRECTORY_SIZE_VALIDATION" {
-		log.Printf("Directory size validation request from %s: %d bytes (%.2f GB)",
-			clientAddr, header.FileSize, float64(header.FileSize)/1024/1024/1024)
-
-		if _, err := conn.Write([]byte("Directory size validated!\n")); err != nil {
-			log.Printf("Failed to send validation response to client %s: %v", clientAddr, err)
-		}
-
-		// Log the validation duration.
-		transferDuration := time.Since(startTime)
-		log.Printf("Directory size validation completed from %s (duration: %v)", clientAddr, transferDuration)
-		return
-	}
-
-	// Log transfer reception start.
-	transferType := "file"
-	if header.TransferType == protocol.TransferTypeDirectory {
-		transferType = "directory"
-	}
-	log.Printf("Receiving %s from %s: %s (size: %d bytes)", transferType, clientAddr, header.FileName, header.FileSize)
-
-	// Create the directory to save the received file (if it doesn't exist).
-	// `0755`: "OwnerCanDoAllExecuteGroupOtherCanReadExecute" (https://pkg.go.dev/gitlab.com/evatix-go/core/filemode).
-	if err := os.MkdirAll(*destDir, 0755); err != nil {
-		log.Printf("Failed to create directory %s for client %s: %v", *destDir, clientAddr, err)
-		sendErrorResponse(conn, "Failed to create output directory")
-		return
-	}
-
-	var outputPath string
-	var receivedFileName string
-
-	// If the file name contains directory separators (either `/` or `\`), it is a relative path, so preserve the directory structure.
-	if strings.Contains(header.FileName, "/") || strings.Contains(header.FileName, string(filepath.Separator)) {
-		outputPath = filepath.Join(*destDir, header.FileName)
-		receivedFileName = header.FileName
-		// Create the directory structure if it doesn't exist.
-		outputDir := filepath.Dir(outputPath)
-		if err := os.MkdirAll(outputDir, 0755); err != nil {
-			log.Printf("Failed to create directory structure %s for client %s: %v", outputDir, clientAddr, err)
-			sendErrorResponse(conn, "Failed to create directory structure")
+	// Handle multiple file transfers on the same connection to persist the connection
+	// until the client closes the connection or an error occurs.
+	for {
+		// Refresh connection timeouts for each file transfer to prevent hanging connections.
+		if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
+			log.Printf("Failed to set read deadline: %v", err)
 			return
 		}
-	} else {
-		// Since it is a simple file name, use the original name.
-		receivedFileName = header.FileName
-		outputPath = filepath.Join(*destDir, receivedFileName)
-	}
-
-	// Handle file conflicts using the specified strategy.
-	finalPath, err := handleFileConflict(outputPath, receivedFileName, *fileStrategy)
-	if err != nil {
-		if strings.Contains(err.Error(), "skip strategy is enabled") {
-			log.Printf("Skipping file from %s: %v", clientAddr, err)
-			sendErrorResponse(conn, "File already exists and skip strategy is enabled")
-		} else {
-			log.Printf("Failed to handle file conflict for %s: %v", clientAddr, err)
-			sendErrorResponse(conn, fmt.Sprintf("Failed to handle file conflict: %v", err))
+		if err := conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
+			log.Printf("Failed to set write deadline: %v", err)
+			return
 		}
-		return
-	}
 
-	// Create the output file.
-	outputFile, err := os.Create(finalPath)
-	if err != nil {
-		log.Printf("Failed to create output file %s for client %s: %v", finalPath, clientAddr, err)
-		sendErrorResponse(conn, "Failed to create output file")
-		return
-	}
+		// Read the file transfer header.
+		header, err := protocol.ReadHeader(conn)
+		if err != nil {
+			// If EOF, the client closed the connection gracefully (end of session).
+			if errors.Is(err, io.EOF) {
+				log.Printf("Client %s closed connection (end of session)", clientAddr)
+				return
+			}
 
-	defer func() {
+			log.Printf("Failed to read file transfer header from %s: %v", clientAddr, err)
+			// Send error response only if connection is still valid.
+			if !errors.Is(err, io.EOF) {
+				sendErrorResponse(conn, "Failed to read file transfer header: "+err.Error())
+			}
+			return
+		}
+
+		// Validate the header.
+		if err := validateHeader(header, clientAddr); err != nil {
+			log.Printf("Header validation failed from %s: %v", clientAddr, err)
+			sendErrorResponse(conn, err.Error())
+			return
+		}
+
+		// Check if this is a directory size validation request.
+		// This is a single-use connection, so return after validation.
+		if header.FileName == "DIRECTORY_SIZE_VALIDATION" {
+			log.Printf("Directory size validation request from %s: %d bytes (%.2f GB)",
+				clientAddr, header.FileSize, float64(header.FileSize)/1024/1024/1024)
+
+			if _, err := conn.Write([]byte("Directory size validated!\n")); err != nil {
+				log.Printf("Failed to send validation response to client %s: %v", clientAddr, err)
+			}
+
+			transferDuration := time.Since(startTime)
+			log.Printf("Directory size validation completed from %s (duration: %v)", clientAddr, transferDuration)
+			return
+		}
+
+		transferType := "file"
+		if header.TransferType == protocol.TransferTypeDirectory {
+			transferType = "directory"
+		}
+		log.Printf("Receiving %s from %s: %s (size: %d bytes)", transferType, clientAddr, header.FileName, header.FileSize)
+
+		// Create the directory to save the received file (if it doesn't exist).
+		// `0755`: "OwnerCanDoAllExecuteGroupOtherCanReadExecute" (https://pkg.go.dev/gitlab.com/evatix-go/core/filemode).
+		if err := os.MkdirAll(*destDir, 0755); err != nil {
+			log.Printf("Failed to create directory %s for client %s: %v", *destDir, clientAddr, err)
+			sendErrorResponse(conn, "Failed to create output directory")
+			return
+		}
+
+		var outputPath string
+		var receivedFileName string
+
+		// If the file name contains directory separators (either `/` or `\`), it is a relative path, so preserve the directory structure.
+		if strings.Contains(header.FileName, "/") || strings.Contains(header.FileName, string(filepath.Separator)) {
+			outputPath = filepath.Join(*destDir, header.FileName)
+			receivedFileName = header.FileName
+			// Create the directory structure if it doesn't exist.
+			outputDir := filepath.Dir(outputPath)
+			if err := os.MkdirAll(outputDir, 0755); err != nil {
+				log.Printf("Failed to create directory structure %s for client %s: %v", outputDir, clientAddr, err)
+				sendErrorResponse(conn, "Failed to create directory structure")
+				return
+			}
+		} else {
+			// Since it is a simple file name, use the original name.
+			receivedFileName = header.FileName
+			outputPath = filepath.Join(*destDir, receivedFileName)
+		}
+
+		// Handle file conflicts using the specified strategy.
+		finalPath, err := handleFileConflict(outputPath, receivedFileName, *fileStrategy)
+		if err != nil {
+			if strings.Contains(err.Error(), "skip strategy is enabled") {
+				log.Printf("Skipping file from %s: %v", clientAddr, err)
+				sendErrorResponse(conn, "File already exists and skip strategy is enabled")
+			} else {
+				log.Printf("Failed to handle file conflict for %s: %v", clientAddr, err)
+				sendErrorResponse(conn, fmt.Sprintf("Failed to handle file conflict: %v", err))
+			}
+			// Continue to next file instead of returning, to allow other files in the session to transfer.
+			continue
+		}
+
+		// Create the output file.
+		outputFile, err := os.Create(finalPath)
+		if err != nil {
+			log.Printf("Failed to create output file %s for client %s: %v", finalPath, clientAddr, err)
+			sendErrorResponse(conn, "Failed to create output file")
+			return
+		}
+
+		// Stream file content directly to disk while calculating checksum on the fly.
+		log.Printf("Receiving file content from %s...", clientAddr)
+
+		// Create a context reader that can be interrupted during shutdown.
+		ctxReader := &contextReader{
+			ctx:  ctx,
+			conn: conn,
+		}
+
+		// Create a `LimitReader` to prevent reading past the specified file size.
+		limitReader := io.LimitReader(ctxReader, int64(header.FileSize))
+
+		// Create a `TeeReader` that reads from network and writes to hash while returning data to be copied to file.
+		hasher := sha256.New()
+		teeReader := io.TeeReader(limitReader, hasher)
+
+		// Create a `ProgressWriter` to track transfer progress.
+		progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Receiving %s", header.FileName))
+
+		// Stream file content directly to disk while calculating checksum on the fly.
+		bytesWritten, err := io.Copy(progressWriter, teeReader)
+		if err != nil {
+			log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
+			if errors.Is(err, io.EOF) {
+				log.Printf("Client %s disconnected during file transfer", clientAddr)
+			}
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				log.Printf("Client %s sent incomplete file data", clientAddr)
+			}
+			if ctx.Err() != nil {
+				log.Printf("Transfer interrupted due to server shutdown: %v", ctx.Err())
+			}
+			// Clean up the partial file.
+			if err := os.Remove(finalPath); err != nil {
+				log.Printf("Failed to remove partial file %s: %v", finalPath, err)
+			}
+			outputFile.Close()
+			sendErrorResponse(conn, "Failed to receive file content")
+			return
+		}
+
+		// Close the file after writing.
 		if err := outputFile.Close(); err != nil {
 			log.Printf("Error closing output file %s: %v", finalPath, err)
 		}
-	}()
 
-	// Stream file content directly to disk while calculating checksum on the fly.
-	log.Printf("Receiving file content from %s...", clientAddr)
-
-	// Create a context reader that can be interrupted during shutdown.
-	ctxReader := &contextReader{
-		ctx:  ctx,
-		conn: conn,
-	}
-
-	// Create a `LimitReader` to prevent reading past the specified file size.
-	limitReader := io.LimitReader(ctxReader, int64(header.FileSize))
-
-	// Create a `TeeReader` that reads from network and writes to hash while returning data to be copied to file.
-	hasher := sha256.New()
-	teeReader := io.TeeReader(limitReader, hasher)
-
-	// Create a `ProgressWriter` to track transfer progress.
-	progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Receiving %s", header.FileName))
-
-	// Stream file content directly to disk while calculating checksum on the fly.
-	bytesWritten, err := io.Copy(progressWriter, teeReader)
-	if err != nil {
-		log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
-		if errors.Is(err, io.EOF) {
-			log.Printf("Client %s disconnected during file transfer", clientAddr)
+		// Verify that we received the expected number of bytes.
+		if bytesWritten != int64(header.FileSize) {
+			log.Printf("File size mismatch for client %s: expected %d, received %d",
+				clientAddr, header.FileSize, bytesWritten)
+			// Clean up the partial file.
+			if err := os.Remove(finalPath); err != nil {
+				log.Printf("Failed to remove incomplete file %s: %v", finalPath, err)
+			}
+			sendErrorResponse(conn, "File size mismatch")
+			return
 		}
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			log.Printf("Client %s sent incomplete file data", clientAddr)
+
+		progressWriter.Complete()
+
+		// Verify the checksum of the received file content.
+		log.Printf("Verifying received data integrity...")
+		calculatedChecksum := hasher.Sum(nil)
+		if !bytes.Equal(calculatedChecksum, header.Checksum) {
+			log.Printf("Data checksum verification failed for client %s: expected %x, got %x",
+				clientAddr, header.Checksum, calculatedChecksum)
+			// Delete the corrupted file immediately.
+			if err := os.Remove(finalPath); err != nil {
+				log.Printf("Failed to remove corrupted file %s: %v", finalPath, err)
+			}
+			sendErrorResponse(conn, "Data integrity check failed")
+			return
 		}
-		if ctx.Err() != nil {
-			log.Printf("Transfer interrupted due to server shutdown: %v", ctx.Err())
+		log.Printf("Data checksum verification passed")
+
+		log.Printf("File integrity verified for %s", header.FileName)
+
+		// Update directory size tracking for directory transfers.
+		if header.TransferType == protocol.TransferTypeDirectory {
+			dirSizeMutex.Lock()
+			directorySizes[clientAddr] += header.FileSize
+			currentTotal := directorySizes[clientAddr]
+			dirSizeMutex.Unlock()
+			log.Printf("Directory transfer progress for %s: %d bytes (%.2f GB)",
+				clientAddr, currentTotal, float64(currentTotal)/1024/1024/1024)
 		}
-		// Clean up the partial file.
-		if err := os.Remove(finalPath); err != nil {
-			log.Printf("Failed to remove partial file %s: %v", finalPath, err)
+
+		if _, err := conn.Write([]byte("Transfer received!\n")); err != nil {
+			log.Printf("Failed to send success response to client %s: %v", clientAddr, err)
+			return
 		}
-		sendErrorResponse(conn, "Failed to receive file content")
-		return
+
+		transferDuration := time.Since(startTime)
+		log.Printf("Transfer completed from %s (duration: %v)", clientAddr, transferDuration)
+
+		// Continue to the next file transfer on the same connection.
+		// The loop will break when the client closes the connection or an error occurs.
 	}
-
-	// Verify that we received the expected number of bytes.
-	if bytesWritten != int64(header.FileSize) {
-		log.Printf("File size mismatch for client %s: expected %d, received %d",
-			clientAddr, header.FileSize, bytesWritten)
-		// Clean up the partial file.
-		if err := os.Remove(finalPath); err != nil {
-			log.Printf("Failed to remove incomplete file %s: %v", finalPath, err)
-		}
-		sendErrorResponse(conn, "File size mismatch")
-		return
-	}
-
-	progressWriter.Complete()
-
-	// Verify the checksum of the received file content.
-	log.Printf("Verifying received data integrity...")
-	calculatedChecksum := hasher.Sum(nil)
-	if !bytes.Equal(calculatedChecksum, header.Checksum) {
-		log.Printf("Data checksum verification failed for client %s: expected %x, got %x",
-			clientAddr, header.Checksum, calculatedChecksum)
-		// Delete the corrupted file immediately.
-		if err := os.Remove(finalPath); err != nil {
-			log.Printf("Failed to remove corrupted file %s: %v", finalPath, err)
-		}
-		sendErrorResponse(conn, "Data integrity check failed")
-		return
-	}
-	log.Printf("Data checksum verification passed")
-
-	log.Printf("File integrity verified for %s", header.FileName)
-
-	// Update directory size tracking for directory transfers.
-	if header.TransferType == protocol.TransferTypeDirectory {
-		dirSizeMutex.Lock()
-		directorySizes[clientAddr] += header.FileSize
-		currentTotal := directorySizes[clientAddr]
-		dirSizeMutex.Unlock()
-		log.Printf("Directory transfer progress for %s: %d bytes (%.2f GB)",
-			clientAddr, currentTotal, float64(currentTotal)/1024/1024/1024)
-	}
-
-	if _, err := conn.Write([]byte("Transfer received!\n")); err != nil {
-		log.Printf("Failed to send success response to client %s: %v", clientAddr, err)
-	}
-
-	transferDuration := time.Since(startTime)
-	log.Printf("Transfer completed from %s (duration: %v)", clientAddr, transferDuration)
 }
 
 // Read (for contextReader) reads from the connection with context support.
@@ -502,7 +521,7 @@ func main() {
 	shutdownChannel := make(chan struct{})
 
 	// Launch a goroutine to periodically log directory transfer statistics.
-	// Log stats every 30 seconds.
+	// Log directory transfer statistics every 30 seconds.
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -552,7 +571,6 @@ func main() {
 			log.Printf("Shutdown timeout reached. Forcing shutdown...")
 		}
 
-		// Log final directory transfer statistics.
 		numClient, totalSize := getDirectoryStats()
 		if numClient > 0 {
 			log.Printf("Final directory transfer stats: %d active clients, %.2f GB total",
