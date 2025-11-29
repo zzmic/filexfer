@@ -1,1 +1,0 @@
-./test/file0.txt content

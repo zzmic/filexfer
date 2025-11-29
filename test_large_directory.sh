@@ -91,8 +91,18 @@ else
 fi
 
 # Clean up.
-echo -e "\n=== Cleaning up ==="
-kill $SERVER_PID 2>/dev/null
+echo -e "\nCleaning up..."
+# Kill the server process and wait for it to terminate gracefully.
+if kill $SERVER_PID 2>/dev/null; then
+    sleep 2
+    kill -9 $SERVER_PID 2>/dev/null
+fi
+# Kill any remaining process on port 8080 if it is still in use.
+if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    kill "$(lsof -Pi :8080 -sTCP:LISTEN -t)" 2>/dev/null
+    sleep 1
+fi
+# Remove the test directories created in the script.
 rm -rf ./large_test_dir
 rm -rf ./large_test_output
 

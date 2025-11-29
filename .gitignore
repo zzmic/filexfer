@@ -31,5 +31,4 @@ go.work.sum
 # .idea/
 .vscode/
 
-bin/
-test_output/
+**/bin/

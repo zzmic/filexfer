@@ -75,14 +75,6 @@ func validateHeader(header *protocol.Header, clientAddr string) error {
 		return fmt.Errorf("%w: file name cannot be empty", ErrEmptyFilename)
 	}
 
-	// Check the file size based on the transfer type.
-	// Individual files should be limited to 5GB regardless of transfer type.
-	maxSize := uint64(MaxFileSize)
-	if header.FileSize > maxSize {
-		return fmt.Errorf("%w: file size %d exceeds maximum allowed size %d",
-			ErrFileTooLarge, header.FileSize, maxSize)
-	}
-
 	// Validate the directory transfer size limits for directory transfers.
 	if header.TransferType == protocol.TransferTypeDirectory {
 		// Check if this is a directory size validation request.
@@ -104,6 +96,13 @@ func validateHeader(header *protocol.Header, clientAddr string) error {
 		if newTotalSize > *maxDirectorySize {
 			return fmt.Errorf("%w: directory transfer size %d would exceed maximum allowed size %d (current: %d, adding: %d)",
 				ErrDirectoryTooLarge, newTotalSize, *maxDirectorySize, currentDirSize, header.FileSize)
+		}
+	} else {
+		// For single file transfers, enforce the 5GB per-file limit.
+		maxSize := uint64(MaxFileSize)
+		if header.FileSize > maxSize {
+			return fmt.Errorf("%w: file size %d exceeds maximum allowed size %d",
+				ErrFileTooLarge, header.FileSize, maxSize)
 		}
 	}
 
@@ -141,8 +140,8 @@ func getDirectoryStats() (int, uint64) {
 	return numClient, totalSize
 }
 
-// handleFileConflict handles file conflicts by applying the specified strategy.
-func handleFileConflict(originalPath, fileName string, strategy string) (string, error) {
+// resolveFilePath resolves the file path based on the conflict strategy for the "overwrite" and "skip" strategies.
+func resolveFilePath(originalPath string, strategy string) (string, error) {
 	// Check if the file exists.
 	if _, err := os.Stat(originalPath); os.IsNotExist(err) {
 		// If the file doesn't exist, return the original path.
@@ -158,10 +157,6 @@ func handleFileConflict(originalPath, fileName string, strategy string) (string,
 		log.Printf("Overwriting existing file: %s", originalPath)
 		return originalPath, nil
 
-	// Generate a new file name with a suffix and return the new path.
-	case StrategyRename:
-		return generateUniqueFilename(originalPath, fileName), nil
-
 	// Return an error to indicate that the file should be skipped (if the file already exists).
 	case StrategySkip:
 		return "", fmt.Errorf("file already exists and skip strategy is enabled: %s", originalPath)
@@ -171,8 +166,8 @@ func handleFileConflict(originalPath, fileName string, strategy string) (string,
 	}
 }
 
-// generateUniqueFilename generates a unique file name by adding a numeric suffix.
-func generateUniqueFilename(originalPath, fileName string) string {
+// generateUniqueFileHandle atomically creates a unique file by adding a numeric suffix for the "rename" strategy.
+func generateUniqueFileHandle(originalPath, fileName string) (*os.File, string, error) {
 	dir := filepath.Dir(originalPath)
 	ext := filepath.Ext(fileName)
 	baseName := strings.TrimSuffix(fileName, ext)
@@ -182,13 +177,20 @@ func generateUniqueFilename(originalPath, fileName string) string {
 		newFileName := fmt.Sprintf("%s_%d%s", baseName, counter, ext)
 		newPath := filepath.Join(dir, newFileName)
 
-		// If the file doesn't exist, return the new path.
-		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+		// Use `os.OpenFile` with `os.O_RDWR|os.O_CREATE|os.O_EXCL` to create the file atomically,
+		// thereby preventing race conditions when multiple clients upload files with the same name simultaneously.
+		f, err := os.OpenFile(newPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
+		if err == nil {
 			log.Printf("Renaming file to avoid conflict: %s -> %s", fileName, newFileName)
-			return newPath
+			return f, newPath, nil
 		}
 
-		// Increment the counter and try again if the file already exists.
+		// If the error is not "file already exists", return the error.
+		if !os.IsExist(err) {
+			return nil, "", fmt.Errorf("failed to create unique file: %v", err)
+		}
+
+		// File already exists, increment the counter and try again.
 		counter++
 	}
 }
@@ -325,25 +327,50 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		}
 
 		// Handle file conflicts using the specified strategy.
-		finalPath, err := handleFileConflict(outputPath, receivedFileName, *fileStrategy)
-		if err != nil {
-			if strings.Contains(err.Error(), "skip strategy is enabled") {
-				log.Printf("Skipping file from %s: %v", clientAddr, err)
-				sendErrorResponse(conn, "File already exists and skip strategy is enabled")
-			} else {
-				log.Printf("Failed to handle file conflict for %s: %v", clientAddr, err)
-				sendErrorResponse(conn, fmt.Sprintf("Failed to handle file conflict: %v", err))
-			}
-			// Continue to next file instead of returning, to allow other files in the session to transfer.
-			continue
-		}
+		var outputFile *os.File
+		var finalPath string
 
-		// Create the output file.
-		outputFile, err := os.Create(finalPath)
-		if err != nil {
-			log.Printf("Failed to create output file %s for client %s: %v", finalPath, clientAddr, err)
-			sendErrorResponse(conn, "Failed to create output file")
-			return
+		if *fileStrategy == StrategyRename {
+			// For "rename" strategy, use atomic file creation to prevent race conditions.
+			// If the file doesn't exist, create it normally.
+			if _, statErr := os.Stat(outputPath); os.IsNotExist(statErr) {
+				outputFile, err = os.Create(outputPath)
+				if err != nil {
+					log.Printf("Failed to create output file %s for client %s: %v", outputPath, clientAddr, err)
+					sendErrorResponse(conn, "Failed to create output file")
+					return
+				}
+				finalPath = outputPath
+			} else {
+				// File exists, use atomic file creation to generate a unique filename.
+				outputFile, finalPath, err = generateUniqueFileHandle(outputPath, receivedFileName)
+				if err != nil {
+					log.Printf("Failed to create unique file for %s: %v", clientAddr, err)
+					sendErrorResponse(conn, fmt.Sprintf("Failed to create unique file: %v", err))
+					return
+				}
+			}
+		} else {
+			// For other strategies ("overwrite", "skip"), resolve the file path.
+			finalPath, err = resolveFilePath(outputPath, *fileStrategy)
+			if err != nil {
+				if strings.Contains(err.Error(), "skip strategy is enabled") {
+					log.Printf("Skipping file from %s: %v", clientAddr, err)
+					sendErrorResponse(conn, "File already exists and skip strategy is enabled")
+				} else {
+					log.Printf("Failed to handle file conflict for %s: %v", clientAddr, err)
+					sendErrorResponse(conn, fmt.Sprintf("Failed to handle file conflict: %v", err))
+				}
+				// Continue to next file instead of returning, to allow other files in the session to transfer.
+				continue
+			}
+
+			outputFile, err = os.Create(finalPath)
+			if err != nil {
+				log.Printf("Failed to create output file %s for client %s: %v", finalPath, clientAddr, err)
+				sendErrorResponse(conn, "Failed to create output file")
+				return
+			}
 		}
 
 		// Stream file content directly to disk while calculating checksum on the fly.

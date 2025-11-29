@@ -17,7 +17,7 @@ echo "./test/file0.txt content" > ./test/file0.txt
 echo '{"key": "value"}' > ./test/file1.txt
 echo '{"another_key": "another_value"}' > ./test.json
 touch ./empty_file.txt
-dd if=/dev/zero of=./large_file.dat bs=1M count=500 2>/dev/null # Create a large file of 500MB which is simply zero-filled.
+dd if=/dev/zero of=./large_file.dat bs=1M count=500 2>/dev/null # Create a large file of size 500MB which is simply zero-filled.
 
 # Build the applications.
 echo "Building applications..."
@@ -63,14 +63,14 @@ echo -e "\nTest 4: Large file transfer (500MB)"
 time ./bin/client -server localhost:8080 -file ./large_file.dat
 echo "Large file transfer completed"
 
-# Test 5: File conflict (rename strategy).
-echo -e "\nTest 5: File conflict handling"
+# Test 5: File conflict handling for the default "rename" strategy.
+echo -e "\nTest 5: File conflict handling for the default 'rename' strategy"
 ./bin/client -server localhost:8080 -file ./test/file1.txt
 ./bin/client -server localhost:8080 -file ./test/file1.txt
 echo "Result:"
 ls -la ./test_output/
 
-# Test 6: Invalid file.
+# Test 6: Invalid file (should fail).
 echo -e "\nTest 6: Invalid file (should fail)"
 ./bin/client -server localhost:8080 -file ./nonexistent_file.txt
 
@@ -81,10 +81,21 @@ find ./test_output -type f
 echo -e "\nDirectory structure:"
 tree ./test_output 2>/dev/null || find ./test_output -type f
 
-# Clean up.
 echo -e "\nCleaning up..."
-kill $SERVER_PID 2>/dev/null
-rm -rf ./test_output/*
-rm -f ./test.txt ./test.json ./empty_file.txt ./large_file.dat
+# Kill the server process and wait for it to terminate gracefully.
+if kill $SERVER_PID 2>/dev/null; then
+    sleep 2
+    kill -9 $SERVER_PID 2>/dev/null
+fi
+# Kill any remaining process on port 8080 if it is still in use.
+if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    kill "$(lsof -Pi :8080 -sTCP:LISTEN -t)" 2>/dev/null
+    sleep 1
+fi
+# Remove the test output directory.
+rm -rf ./test_output
+# Remove the test directories created in the script.
+rm -rf ./test
+rm -f ./test.json ./empty_file.txt ./large_file.dat
 
 echo "=== Test completed! ==="

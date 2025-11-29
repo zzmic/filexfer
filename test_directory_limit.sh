@@ -76,8 +76,12 @@ else
     echo "FAILURE: Directory transfer failed unexpectedly"
 fi
 
-kill $SERVER_PID_1 2>/dev/null
-sleep 3
+# Kill the first server process and wait for it to terminate gracefully.
+if kill $SERVER_PID_1 2>/dev/null; then
+    sleep 2
+    kill -9 $SERVER_PID_1 2>/dev/null
+fi
+sleep 1
 
 # Test 2: Directory transfer exceeding 50GB limit (should fail).
 echo -e "\n=== Test 2: Directory Transfer Exceeding 50GB Limit ==="
@@ -111,10 +115,19 @@ else
     echo "SUCCESS: Large directory transfer correctly rejected due to 50GB limit"
 fi
 
-kill $SERVER_PID_2 2>/dev/null
+# Kill the second server process and wait for it to terminate gracefully.
+if kill $SERVER_PID_2 2>/dev/null; then
+    sleep 2
+    kill -9 $SERVER_PID_2 2>/dev/null
+fi
 
-# Clean up.
-echo -e "\n=== Cleaning up ==="
+echo -e "\nCleaning up..."
+# Kill any remaining process on port 8080 if it is still in use.
+if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    kill "$(lsof -Pi :8080 -sTCP:LISTEN -t)" 2>/dev/null
+    sleep 1
+fi
+# Remove the test directories.
 rm -rf ./test_dir_45gb
 rm -rf ./test_dir_55gb
 rm -rf ./test_output_1
