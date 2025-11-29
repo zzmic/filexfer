@@ -71,14 +71,10 @@ func validateHeader(header *protocol.Header, clientAddr string) error {
 		return fmt.Errorf("header is nil")
 	}
 
-	if header.FileName == "" {
-		return fmt.Errorf("%w: file name cannot be empty", ErrEmptyFilename)
-	}
-
 	// Validate the directory transfer size limits for directory transfers.
 	if header.TransferType == protocol.TransferTypeDirectory {
 		// Check if this is a directory size validation request.
-		if header.FileName == "DIRECTORY_SIZE_VALIDATION" {
+		if header.MessageType == protocol.MessageTypeValidate {
 			if header.FileSize > *maxDirectorySize {
 				return fmt.Errorf("%w: directory size %.2f GB exceeds maximum allowed size %.2f GB",
 					ErrDirectoryTooLarge, float64(header.FileSize)/1024/1024/1024, float64(*maxDirectorySize)/1024/1024/1024) // GB.
@@ -106,7 +102,12 @@ func validateHeader(header *protocol.Header, clientAddr string) error {
 		}
 	}
 
-	// Validate the file name to prevent directory traversal (for security).
+	// `FileName` can be empty for validation messages, but required for transfer messages.
+	if header.MessageType == protocol.MessageTypeTransfer && header.FileName == "" {
+		return fmt.Errorf("%w: file name cannot be empty", ErrEmptyFilename)
+	}
+
+	// Validate the file name to prevent directory/path traversal attacks.
 	// Allow relative paths but prevent absolute paths and parent directory traversal.
 	if filepath.IsAbs(header.FileName) {
 		return fmt.Errorf("invalid file name: absolute paths not allowed: %s", header.FileName)
@@ -279,7 +280,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 
 		// Check if this is a directory size validation request.
 		// This is a single-use connection, so return after validation.
-		if header.FileName == "DIRECTORY_SIZE_VALIDATION" {
+		if header.MessageType == protocol.MessageTypeValidate {
 			log.Printf("Directory size validation request from %s: %d bytes (%.2f GB)",
 				clientAddr, header.FileSize, float64(header.FileSize)/1024/1024/1024)
 

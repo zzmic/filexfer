@@ -24,6 +24,12 @@ const (
 	TransferTypeDirectory = 1 // Transfer type for directory.
 )
 
+// Constants to represent message types.
+const (
+	MessageTypeValidate = 1 // Message type for validation requests.
+	MessageTypeTransfer = 2 // Message type for file transfer requests.
+)
+
 // Custom error types for protocol errors.
 var (
 	ErrInvalidFileSize      = errors.New("invalid file size in header")
@@ -34,10 +40,12 @@ var (
 	ErrInvalidDirectoryPath = errors.New("invalid directory path in header")
 	ErrDirectoryPathTooLong = errors.New("directory path length exceeds maximum allowed size")
 	ErrInvalidTransferType  = errors.New("invalid transfer type in header")
+	ErrInvalidMessageType   = errors.New("invalid message type in header")
 )
 
 // A Header represents the file transfer header.
 type Header struct {
+	MessageType   uint8  // Message type (1 for Validate, 2 for Transfer).
 	FileSize      uint64 // Size of the file or directory in bytes.
 	FileName      string // Name of the file or directory.
 	Checksum      []byte // SHA-256 checksum of the file or directory.
@@ -51,8 +59,14 @@ func validateHeader(header *Header) error {
 		return fmt.Errorf("header is nil")
 	}
 
-	if header.FileName == "" {
-		return fmt.Errorf("%w: filename cannot be empty", ErrInvalidFileName)
+	if header.MessageType != MessageTypeValidate && header.MessageType != MessageTypeTransfer {
+		return fmt.Errorf("%w: message type %d is invalid, expected %d (Validate) or %d (Transfer)",
+			ErrInvalidMessageType, header.MessageType, MessageTypeValidate, MessageTypeTransfer)
+	}
+
+	// `FileName` can be empty for validation messages.
+	if header.MessageType == MessageTypeTransfer && header.FileName == "" {
+		return fmt.Errorf("%w: filename cannot be empty for transfer messages", ErrInvalidFileName)
 	}
 
 	if len(header.FileName) > MaxFileNameLength {
@@ -94,6 +108,11 @@ func WriteHeader(w io.Writer, header *Header) error {
 
 	if err := validateHeader(header); err != nil {
 		return fmt.Errorf("invalid header for writing: %w", err)
+	}
+
+	// Write the message type as a single byte.
+	if _, err := w.Write([]byte{header.MessageType}); err != nil {
+		return fmt.Errorf("failed to write message type: %w", err)
 	}
 
 	// Write the file size as 8 bytes in big-endian format.
@@ -143,6 +162,20 @@ func ReadHeader(r io.Reader) (*Header, error) {
 		return nil, fmt.Errorf("reader is nil")
 	}
 
+	// Read the message type (1 byte).
+	messageTypeBytes := make([]byte, 1)
+	n, err := io.ReadFull(r, messageTypeBytes)
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("unexpected end of stream while reading message type: %w", err)
+		}
+		return nil, fmt.Errorf("failed to read message type: %w", err)
+	}
+	if n != 1 {
+		return nil, fmt.Errorf("incomplete message type read: got %d bytes, expected 1", n)
+	}
+	messageType := messageTypeBytes[0]
+
 	// Read the file size (8 bytes, big-endian).
 	var fileSize uint64
 	if err := binary.Read(r, binary.BigEndian, &fileSize); err != nil {
@@ -186,7 +219,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 
 	// Read the checksum (32 bytes, fixed size).
 	checksumBytes := make([]byte, ChecksumSize)
-	n, err := io.ReadFull(r, checksumBytes)
+	n, err = io.ReadFull(r, checksumBytes)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, fmt.Errorf("unexpected end of stream while reading checksum: got %d bytes, expected %d: %w",
@@ -246,6 +279,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 
 	// Create and validate the header.
 	header := &Header{
+		MessageType:   messageType,
 		FileSize:      fileSize,
 		FileName:      fileName,
 		Checksum:      checksumBytes,

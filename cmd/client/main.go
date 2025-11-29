@@ -283,6 +283,7 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 		transferType = uint8(protocol.TransferTypeDirectory)
 	}
 	header := &protocol.Header{
+		MessageType:   protocol.MessageTypeTransfer, // Message type for file transfer.
 		FileSize:      uint64(statInfo.Size()),
 		FileName:      fileName,
 		Checksum:      checksum,
@@ -406,8 +407,9 @@ func validateDirectorySize(totalSize int64) error {
 
 	// Create a special header for directory size validation.
 	header := &protocol.Header{
+		MessageType:   protocol.MessageTypeValidate,   // Message type for validation.
 		FileSize:      uint64(totalSize),              // Total size of the directory.
-		FileName:      "DIRECTORY_SIZE_VALIDATION",    // Special filename for directory size validation.
+		FileName:      "",                             // Empty filename for validation messages.
 		Checksum:      make([]byte, 32),               // Empty checksum for validation.
 		TransferType:  protocol.TransferTypeDirectory, // Transfer type is directory.
 		DirectoryPath: "",                             // Empty directory path.
