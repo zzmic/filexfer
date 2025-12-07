@@ -54,6 +54,6 @@ jobs:
     - name: Run the large directory tests
       run: ./test_large_directory.sh
 
-    # Skipping this test for now as it would cause the workflow to fail (as the disk space would be exceeded/exhausted).
+    # Skipping this test for now as it would cause the workflow to fail (as the disk space would be saturated).
     # - name: Run the directory limit tests
     #   run: ./test_directory_limit.sh

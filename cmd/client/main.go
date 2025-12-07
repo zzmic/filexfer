@@ -87,16 +87,14 @@ func validatePath(path string) error {
 	return nil
 }
 
-// readServerResponse reads and processes the server's response.
+// readServerResponse reads and processes the server's response after a file transfer.
 func readServerResponse(conn net.Conn) error {
 	// Set a short timeout for reading the response.
 	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
 		return fmt.Errorf("failed to set a read deadline: %w", err)
 	}
 
-	// Read the response from the server.
-	response := make([]byte, 1024)
-	n, err := conn.Read(response)
+	status, message, err := protocol.ReadResponse(conn)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return fmt.Errorf("server closed connection unexpectedly")
@@ -104,18 +102,13 @@ func readServerResponse(conn net.Conn) error {
 		return fmt.Errorf("failed to read server response: %w", err)
 	}
 
-	// Convert the response to a string.
-	responseStr := string(response[:n])
-	if _, after, found := strings.Cut(responseStr, "ERROR:"); found {
-		return fmt.Errorf("server error: %s", strings.TrimSpace(after))
-	}
-	if strings.HasPrefix(responseStr, "SUCCESS:") {
-		log.Printf("Server response: %s", strings.TrimSpace(responseStr))
-		return nil
+	if status == protocol.ResponseStatusError {
+		return fmt.Errorf("server error: %s", message)
 	}
 
-	// Fallback to a generic message.
-	log.Printf("Server response: %s", strings.TrimSpace(responseStr))
+	if message != "" {
+		log.Printf("Server response: %s", message)
+	}
 	return nil
 }
 
@@ -144,25 +137,20 @@ func (cw *contextWriter) Write(p []byte) (n int, err error) {
 }
 
 func main() {
-	// Parse command-line flags.
 	flag.Parse()
 
-	// Setup structured logging.
 	setupLogging()
 
 	log.Printf("Starting the file transfer client...")
 
-	// Validate command-line arguments.
 	if err := validateArgs(); err != nil {
 		log.Fatalf("Invalid command-line arguments: %v", err)
 	}
 
-	// Validate the path before attempting to connect.
 	if err := validatePath(*filePath); err != nil {
 		log.Fatalf("Path validation failed: %v", err)
 	}
 
-	// Check if the path is a directory or file.
 	fileInfo, err := os.Stat(*filePath)
 	if err != nil {
 		log.Fatalf("Failed to get path information: %v", err)

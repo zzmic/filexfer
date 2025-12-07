@@ -119,11 +119,17 @@ func validateHeader(header *protocol.Header, clientAddr string) error {
 	return nil
 }
 
-// sendErrorResponse sends an error message to the client.
+// sendErrorResponse sends an error response to the client.
 func sendErrorResponse(conn net.Conn, message string) {
-	errorMsg := fmt.Sprintf("ERROR: %s\n", message)
-	if _, err := conn.Write([]byte(errorMsg)); err != nil {
+	if err := protocol.WriteResponse(conn, protocol.ResponseStatusError, message); err != nil {
 		log.Printf("Failed to send error response to client: %v", err)
+	}
+}
+
+// sendSuccessResponse sends a success response to the client.
+func sendSuccessResponse(conn net.Conn, message string) {
+	if err := protocol.WriteResponse(conn, protocol.ResponseStatusSuccess, message); err != nil {
+		log.Printf("Failed to send success response to client: %v", err)
 	}
 }
 
@@ -284,9 +290,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 			log.Printf("Directory size validation request from %s: %d bytes (%.2f GB)",
 				clientAddr, header.FileSize, float64(header.FileSize)/1024/1024/1024)
 
-			if _, err := conn.Write([]byte("Directory size validated!\n")); err != nil {
-				log.Printf("Failed to send validation response to client %s: %v", clientAddr, err)
-			}
+			sendSuccessResponse(conn, "Directory size validated!")
 
 			transferDuration := time.Since(startTime)
 			log.Printf("Directory size validation completed from %s (duration: %v)", clientAddr, transferDuration)
@@ -461,10 +465,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 				clientAddr, currentTotal, float64(currentTotal)/1024/1024/1024)
 		}
 
-		if _, err := conn.Write([]byte("Transfer received!\n")); err != nil {
-			log.Printf("Failed to send success response to client %s: %v", clientAddr, err)
-			return
-		}
+		sendSuccessResponse(conn, "Transfer received!")
 
 		transferDuration := time.Since(startTime)
 		log.Printf("Transfer completed from %s (duration: %v)", clientAddr, transferDuration)
@@ -493,7 +494,6 @@ func (cr *contextReader) Read(p []byte) (n int, err error) {
 }
 
 func main() {
-	// Parse command-line flags.
 	flag.Parse()
 
 	// Validate the file strategy flag.
