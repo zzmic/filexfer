@@ -383,7 +383,11 @@ func validateDirectorySize(totalSize int64) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect for directory size validation: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("Error closing validation connection: %v", err)
+		}
+	}()
 
 	// Set connection timeouts.
 	if err := conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {

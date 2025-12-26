@@ -410,11 +410,12 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 			if ctx.Err() != nil {
 				log.Printf("Transfer interrupted due to server shutdown: %v", ctx.Err())
 			}
-			// Clean up the partial file.
 			if err := os.Remove(finalPath); err != nil {
 				log.Printf("Failed to remove partial file %s: %v", finalPath, err)
 			}
-			outputFile.Close()
+			if err := outputFile.Close(); err != nil {
+				log.Printf("Error closing output file %s: %v", finalPath, err)
+			}
 			sendErrorResponse(conn, "Failed to receive file content")
 			return
 		}

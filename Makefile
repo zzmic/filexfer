@@ -24,7 +24,8 @@ GREEN = \033[32m
 YELLOW = \033[33m
 CYAN = \033[36m
 
-.PHONY: all build client server clean deps tidy fmt vet lint install uninstall run-client run-server test-all test-sh test-large-directory-sh test-directory-limit-sh help
+.PHONY: all build client server clean fmt vet clean deps tidy lint install uninstall \
+	run-client run-server test-all test-sh test-large-directory-sh test-directory-limit-sh help
 
 all: fmt vet build
 
@@ -67,6 +68,9 @@ deps:
 
 tidy:
 	$(GOMOD) tidy
+
+lint:
+	golangci-lint run ./...
 
 install: build
 	@echo "$(CYAN)Installing binaries to GOPATH...$(RESET)"
@@ -125,6 +129,7 @@ help:
 	@printf '  %-30s %s\n' 'clean' 'Clean build artifacts.'
 	@printf '  %-30s %s\n' 'deps' 'Download project dependencies.'
 	@printf '  %-30s %s\n' 'tidy' 'Tidy up go.mod and go.sum files.'
+	@printf '  %-30s %s\n' 'lint' 'Run golangci-lint on the codebase.'
 	@printf '  %-30s %s\n' 'install' 'Install client and server binaries to GOPATH/bin.'
 	@printf '  %-30s %s\n' 'uninstall' 'Uninstall client and server binaries from GOPATH/bin.'
 	@printf '  %-30s %s\n' 'run-client' 'Run the client binary with optional ARGS.'
