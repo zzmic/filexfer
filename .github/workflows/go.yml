@@ -46,7 +46,8 @@ jobs:
         fi
 
     - name: Make the test scripts executable
-      run: chmod +x test.sh test_directory_limit.sh test_large_directory.sh
+      # run: chmod +x test.sh test_large_directory.sh test_directory_limit.sh
+      run: chmod +x test.sh test_large_directory.sh
 
     - name: Run the basic integration tests
       run: ./test.sh

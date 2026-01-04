@@ -69,7 +69,7 @@ make run-server ARGS="-port 9090 -dir /path/to/dest -strategy overwrite"
 **Server Options:**
 - `-port string`: Listening port (default "8080").
 - `-dir string`: Destination directory for received files (default "test").
-- `-strategy string`: File conflict strategy: overwrite, rename, or skip (default "rename").
+- `-strategy string`: File conflict-resolution strategy: overwrite, rename, or skip (default "rename").
 - `-max-dir-size uint64`: Maximum directory transfer size in bytes (default 53687091200 = 50GB).
 
 ### Running the Client
@@ -170,18 +170,6 @@ The binary protocol uses a length-prefixed format for efficient bandwidth usage 
 ### Running the Test Suite
 
 ```bash
-# Run all test scripts.
-make test-all
-```
-
-This executes all test scripts in sequence:
-- `test.sh`: Comprehensive test suite
-- `test_large_directory.sh`: Large directory structure testing
-- `test_directory_limit.sh`: Directory size limit validation
-
-### Individual Test Scripts
-
-```bash
 # Run the basic test script.
 make test-sh
 ```
@@ -228,5 +216,5 @@ This script validates that the `-max-dir-size` parameter properly enforces direc
 ### Adding New Features
 - **Protocol extensions**: Extend header structure in `protocol/header.go`.
 - **Transfer types**: Add new transfer types in protocol constants in `protocol/header.go`.
-- **Conflict strategies**: Implement new strategies in server logic in `cmd/server/main.go`.
+- **Conflict-resolution strategies**: Implement new strategies in server logic in `cmd/server/main.go`.
 - **Progress formats**: Customize progress display in `protocol/progress.go`.

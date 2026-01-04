@@ -7,8 +7,8 @@ GOFMT = $(GOCMD) fmt
 GOVET = $(GOCMD) vet
 
 LDFLAGS = -ldflags "-s -w" # For smaller binaries by stripping debug info.
-# RACE_FLAG=-race
-RACE_FLAG =
+RACE_FLAG = -race
+# RACE_FLAG =
 
 BINARY_DIR = bin
 CLIENT_BINARY = $(BINARY_DIR)/client
@@ -25,7 +25,7 @@ YELLOW = \033[33m
 CYAN = \033[36m
 
 .PHONY: all build client server clean fmt vet clean deps tidy lint install uninstall \
-	run-client run-server test-all test-sh test-large-directory-sh test-directory-limit-sh help
+	run-client run-server test test-sh test-large-directory-sh test-directory-limit-sh help
 
 all: fmt vet build
 
@@ -92,22 +92,17 @@ run-client: client
 run-server: server
 	./$(SERVER_BINARY) $(ARGS)
 
-test-all:
-	chmod +x ${TEST_SCRIPTS}
-	./test.sh
-	./test_large_directory.sh
-	./test_directory_limit.sh
+test:
+	$(GOCMD) test -v ./...
 
 test-sh:
 	chmod +x test.sh
 	./test.sh
 
-# Run `test_large_directory.sh`.
 test-large-directory-sh:
 	chmod +x test_large_directory.sh
 	./test_large_directory.sh
 
-# Run `test_directory_limit.sh`.
 test-directory-limit-sh:
 	chmod +x test_directory_limit.sh
 	./test_directory_limit.sh
@@ -124,17 +119,17 @@ help:
 	@printf '  %-30s %s\n' 'build' 'Build both client and server binaries.'
 	@printf '  %-30s %s\n' 'client' 'Build the client binary.'
 	@printf '  %-30s %s\n' 'server' 'Build the server binary.'
-	@printf '  %-30s %s\n' 'fmt' 'Format the code using gofmt.'
-	@printf '  %-30s %s\n' 'vet' 'Vet the code using govet.'
+	@printf '  %-30s %s\n' 'fmt' 'Format the codebase using gofmt.'
+	@printf '  %-30s %s\n' 'vet' 'Vet the codebase using govet.'
 	@printf '  %-30s %s\n' 'clean' 'Clean build artifacts.'
 	@printf '  %-30s %s\n' 'deps' 'Download project dependencies.'
-	@printf '  %-30s %s\n' 'tidy' 'Tidy up go.mod and go.sum files.'
+	@printf '  %-30s %s\n' 'tidy' 'Ensure that the go.mod file matches the source code in the module.'
 	@printf '  %-30s %s\n' 'lint' 'Run golangci-lint on the codebase.'
 	@printf '  %-30s %s\n' 'install' 'Install client and server binaries to GOPATH/bin.'
 	@printf '  %-30s %s\n' 'uninstall' 'Uninstall client and server binaries from GOPATH/bin.'
 	@printf '  %-30s %s\n' 'run-client' 'Run the client binary with optional ARGS.'
 	@printf '  %-30s %s\n' 'run-server' 'Run the server binary with optional ARGS.'
-	@printf '  %-30s %s\n' 'test' 'Run all test scripts.'
+	@printf '  %-30s %s\n' 'test' 'Run GO tests.'
 	@printf '  %-30s %s\n' 'test-sh' 'Run test.sh script.'
 	@printf '  %-30s %s\n' 'test-large-directory-sh' 'Run test_large_directory.sh script.'
 	@printf '  %-30s %s\n' 'test-directory-limit-sh' 'Run test_directory_limit.sh script.'
