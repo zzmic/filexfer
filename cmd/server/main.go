@@ -59,6 +59,12 @@ var (
 	dirSizeMutex   sync.RWMutex              // Mutex for synchronizing access to `directorySizes` map.
 )
 
+// contextReader supports reading from a connection with context cancellation support.
+type contextReader struct {
+	ctx  context.Context
+	conn net.Conn
+}
+
 // setupLogging configures structured logging with timestamps and custom prefix.
 func setupLogging() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
@@ -210,8 +216,8 @@ func resolveFilePath(originalPath string, strategy string) (string, error) {
 	}
 }
 
-// uniqueFileGenerator atomically creates a unique file by adding a numeric suffix for the "rename" strategy.
-func uniqueFileGenerator(originalPath, fileName string) (*os.File, string, error) {
+// generateUniqueFile atomically creates a unique file by adding a numeric suffix for the "rename" strategy.
+func generateUniqueFile(originalPath, fileName string) (*os.File, string, error) {
 	dir := filepath.Dir(originalPath)
 	ext := filepath.Ext(fileName)
 	baseName := strings.TrimSuffix(fileName, ext)
@@ -235,12 +241,6 @@ func uniqueFileGenerator(originalPath, fileName string) (*os.File, string, error
 		}
 		counter++
 	}
-}
-
-// contextReader supports reading from a connection with context cancellation support.
-type contextReader struct {
-	ctx  context.Context
-	conn net.Conn
 }
 
 // handleConnection handles a client connection with context support for graceful shutdown.
@@ -367,7 +367,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 				}
 				finalPath = outputPath
 			} else {
-				outputFile, finalPath, err = uniqueFileGenerator(outputPath, receivedFileName)
+				outputFile, finalPath, err = generateUniqueFile(outputPath, receivedFileName)
 				if err != nil {
 					log.Printf("Failed to create unique file for %s: %v", clientAddr, err)
 					sendErrorResponse(conn, fmt.Sprintf("Failed to create unique file: %v", err))

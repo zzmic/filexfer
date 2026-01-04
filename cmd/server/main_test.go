@@ -8,6 +8,46 @@ import (
 	"testing"
 )
 
+// TestToGB tests the `toGB` function to ensure it appropriately converts bytes to gigabytes.
+func TestToGB(t *testing.T) {
+	tests := []struct {
+		name     string
+		bytes    uint64
+		expected float64
+	}{
+		{
+			name:     "zero bytes",
+			bytes:    0,
+			expected: 0.0,
+		},
+		{
+			name:     "1 GB",
+			bytes:    1024 * 1024 * 1024,
+			expected: 1.0,
+		},
+		{
+			name:     "5 GB",
+			bytes:    5 * 1024 * 1024 * 1024,
+			expected: 5.0,
+		},
+		{
+			name:     "1 MB",
+			bytes:    1024 * 1024,
+			expected: 0.0009765625,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toGB(tt.bytes)
+			const epsilon = 1e-7
+			if math.Abs(got-tt.expected) > epsilon {
+				t.Fatalf("toGB(...) = %f, expected %f", got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestPathSanitization tests the `sanitizePath` function to ensure it appropriately handles various path inputs, including attempts at, perhaps malicious or erroneous, directory traversal.
 func TestPathSanitization(t *testing.T) {
 	base := t.TempDir()
@@ -77,46 +117,6 @@ func TestPathSanitization(t *testing.T) {
 
 			if got != tt.expectedPath {
 				t.Fatalf("sanitizePath(...) = %q, expected %q", got, tt.expectedPath)
-			}
-		})
-	}
-}
-
-// TestToGB tests the `toGB` function to ensure it appropriately converts bytes to gigabytes.
-func TestToGB(t *testing.T) {
-	tests := []struct {
-		name     string
-		bytes    uint64
-		expected float64
-	}{
-		{
-			name:     "zero bytes",
-			bytes:    0,
-			expected: 0.0,
-		},
-		{
-			name:     "1 GB",
-			bytes:    1024 * 1024 * 1024,
-			expected: 1.0,
-		},
-		{
-			name:     "5 GB",
-			bytes:    5 * 1024 * 1024 * 1024,
-			expected: 5.0,
-		},
-		{
-			name:     "1 MB",
-			bytes:    1024 * 1024,
-			expected: 0.0009765625,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := toGB(tt.bytes)
-			const epsilon = 1e-7
-			if math.Abs(got-tt.expected) > epsilon {
-				t.Fatalf("toGB(...) = %f, expected %f", got, tt.expected)
 			}
 		})
 	}
@@ -207,6 +207,41 @@ func TestValidateHeaderValidFile(t *testing.T) {
 	}
 }
 
+// TestGetDirectoryStatsNonEmpty tests the `getDirectoryStats` function to ensure it correctly calculates the number of clients and total directory size.
+func TestGetDirectoryStatsNonEmpty(t *testing.T) {
+	dirSizeMutex.Lock()
+	directorySizes = make(map[string]uint64)
+	directorySizes["client1"] = 100
+	directorySizes["client2"] = 200
+	directorySizes["client3"] = 300
+	dirSizeMutex.Unlock()
+
+	numClients, totalSize := getDirectoryStats()
+
+	if numClients != 3 {
+		t.Fatalf("expected 3 clients, got %d", numClients)
+	}
+	if totalSize != 600 {
+		t.Fatalf("expected total size 600, got %d", totalSize)
+	}
+}
+
+// TestGetDirectoryStatsEmpty tests the `getDirectoryStats` function to ensure it correctly handles an empty `directorySizes` map.
+func TestGetDirectoryStatsEmpty(t *testing.T) {
+	dirSizeMutex.Lock()
+	directorySizes = make(map[string]uint64)
+	dirSizeMutex.Unlock()
+
+	numClients, totalSize := getDirectoryStats()
+
+	if numClients != 0 {
+		t.Fatalf("expected 0 clients, got %d", numClients)
+	}
+	if totalSize != 0 {
+		t.Fatalf("expected total size 0, got %d", totalSize)
+	}
+}
+
 // TestResolveFilePathNonExistent tests the `resolveFilePath` function to ensure it correctly handles a non-existent file path.
 func TestResolveFilePathNonExistent(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -258,12 +293,12 @@ func TestResolveFilePathSkip(t *testing.T) {
 	}
 }
 
-// TestUniqueFileGenerator tests the `uniqueFileGenerator` function to ensure it generates a unique file name when a conflict exists.
-func TestUniqueFileGenerator(t *testing.T) {
+// TestGenerateUniqueFile tests the `generateUniqueFile` function to ensure it generates a unique file name when a conflict exists.
+func TestGenerateUniqueFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "file.txt")
 
-	f, finalPath, err := uniqueFileGenerator(originalPath, "file.txt")
+	f, finalPath, err := generateUniqueFile(originalPath, "file.txt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -287,8 +322,8 @@ func TestUniqueFileGenerator(t *testing.T) {
 	}
 }
 
-// TestUniqueFileGeneratorWithExisting tests the `uniqueFileGenerator` function to ensure it generates a unique file name when the original file already exists.
-func TestUniqueFileGeneratorWithExisting(t *testing.T) {
+// TestGenerateUniqueFileWithExisting tests the `generateUniqueFile` function to ensure it generates a unique file name when the original file already exists.
+func TestGenerateUniqueFileWithExisting(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "file.txt")
 
@@ -296,7 +331,7 @@ func TestUniqueFileGeneratorWithExisting(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	f, finalPath, err := uniqueFileGenerator(originalPath, "file.txt")
+	f, finalPath, err := generateUniqueFile(originalPath, "file.txt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -316,8 +351,8 @@ func TestUniqueFileGeneratorWithExisting(t *testing.T) {
 	}
 }
 
-// TestUniqueFileGeneratorMultipleConflicts tests the `uniqueFileGenerator` function to ensure it generates a unique file name when the original file already exists.
-func TestUniqueFileGeneratorMultipleConflicts(t *testing.T) {
+// TestGenerateUniqueFileMultipleConflicts tests the `generateUniqueFile` function to ensure it generates a unique file name when the original file already exists.
+func TestGenerateUniqueFileMultipleConflicts(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "file.txt")
 
@@ -328,7 +363,7 @@ func TestUniqueFileGeneratorMultipleConflicts(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	f, finalPath, err := uniqueFileGenerator(originalPath, "file.txt")
+	f, finalPath, err := generateUniqueFile(originalPath, "file.txt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -341,40 +376,5 @@ func TestUniqueFileGeneratorMultipleConflicts(t *testing.T) {
 	expectedPath := filepath.Join(tmpDir, "file_2.txt")
 	if finalPath != expectedPath {
 		t.Fatalf("expected %q, got %q", expectedPath, finalPath)
-	}
-}
-
-// TestGetDirectoryStats tests the `getDirectoryStats` function to ensure it correctly calculates the number of clients and total directory size.
-func TestGetDirectoryStats(t *testing.T) {
-	dirSizeMutex.Lock()
-	directorySizes = make(map[string]uint64)
-	directorySizes["client1"] = 100
-	directorySizes["client2"] = 200
-	directorySizes["client3"] = 300
-	dirSizeMutex.Unlock()
-
-	numClients, totalSize := getDirectoryStats()
-
-	if numClients != 3 {
-		t.Fatalf("expected 3 clients, got %d", numClients)
-	}
-	if totalSize != 600 {
-		t.Fatalf("expected total size 600, got %d", totalSize)
-	}
-}
-
-// TestGetDirectoryStatsEmpty tests the `getDirectoryStats` function to ensure it correctly handles an empty `directorySizes` map.
-func TestGetDirectoryStatsEmpty(t *testing.T) {
-	dirSizeMutex.Lock()
-	directorySizes = make(map[string]uint64)
-	dirSizeMutex.Unlock()
-
-	numClients, totalSize := getDirectoryStats()
-
-	if numClients != 0 {
-		t.Fatalf("expected 0 clients, got %d", numClients)
-	}
-	if totalSize != 0 {
-		t.Fatalf("expected total size 0, got %d", totalSize)
 	}
 }
