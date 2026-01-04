@@ -93,7 +93,7 @@ run-server: server
 	./$(SERVER_BINARY) $(ARGS)
 
 test:
-	$(GOCMD) test -v ./...
+	$(GOCMD) test -v -cover ./...
 
 test-sh:
 	chmod +x test.sh
