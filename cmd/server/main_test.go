@@ -1,14 +1,33 @@
 package main
 
 import (
+	"bytes"
 	"filexfer/protocol"
+	"log"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-// TestToGB tests the `toGB` function to ensure it appropriately converts bytes to gigabytes.
+// TestSetupLogging tests the `setupLogging` function to ensure it configures structured logging.
+func TestSetupLogging(t *testing.T) {
+	setupLogging()
+
+	expectedFlags := log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile
+	if log.Flags() != expectedFlags {
+		t.Fatalf("expected the log flag(s) `log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile`, got %d", log.Flags())
+	}
+
+	expectedPrefix := LogPrefix + " "
+	if log.Prefix() != expectedPrefix {
+		t.Fatalf("expected the log prefix %q, got %q", expectedPrefix, log.Prefix())
+	}
+}
+
+// TestToGB tests the `toGB` function to ensure it handles bytes to gigabytes conversion.
 func TestToGB(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -42,14 +61,14 @@ func TestToGB(t *testing.T) {
 			got := toGB(tt.bytes)
 			const epsilon = 1e-7
 			if math.Abs(got-tt.expected) > epsilon {
-				t.Fatalf("toGB(...) = %f, expected %f", got, tt.expected)
+				t.Fatalf("`toGB(...)` = %f, expected %f", got, tt.expected)
 			}
 		})
 	}
 }
 
-// TestPathSanitization tests the `sanitizePath` function to ensure it appropriately handles various path inputs, including attempts at, perhaps malicious or erroneous, directory traversal.
-func TestPathSanitization(t *testing.T) {
+// TestSanitizePath tests the `sanitizePath` function to ensure it handles various path inputs, including attempts at, perhaps malicious or erroneous, directory traversal.
+func TestSanitizePath(t *testing.T) {
 	base := t.TempDir()
 
 	tests := []struct {
@@ -106,31 +125,31 @@ func TestPathSanitization(t *testing.T) {
 
 			if tt.errExpected {
 				if err == nil {
-					t.Fatalf("sanitizePath(...) error = nil, expected error")
+					t.Fatalf("`sanitizePath(...)` error = nil, expected error")
 				}
 				return
 			}
 
 			if err != nil {
-				t.Fatalf("sanitizePath(...) unexpected error = %v", err)
+				t.Fatalf("`sanitizePath(...)` unexpected error = %v", err)
 			}
 
 			if got != tt.expectedPath {
-				t.Fatalf("sanitizePath(...) = %q, expected %q", got, tt.expectedPath)
+				t.Fatalf("`sanitizePath(...)` = %q, expected %q", got, tt.expectedPath)
 			}
 		})
 	}
 }
 
-// TestValidateHeaderNilHeader tests the `validateHeader` function to ensure it appropriately handles a nil header.
+// TestValidateHeaderNilHeader tests the `validateHeader` function to ensure it handles a nil header.
 func TestValidateHeaderNilHeader(t *testing.T) {
 	err := validateHeader(nil, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected error for nil header")
+		t.Fatal("expected an error for nil header")
 	}
 }
 
-// TestValidateHeaderFileSizeExceeded tests the `validateHeader` function to ensure it appropriately handles a header with file size exceeding the maximum allowed.
+// TestValidateHeaderFileSizeExceeded tests the `validateHeader` function to ensure it handles a header with file size exceeding the maximum allowed.
 func TestValidateHeaderFileSizeExceeded(t *testing.T) {
 	header := &protocol.Header{
 		TransferType: protocol.TransferTypeFile,
@@ -142,11 +161,11 @@ func TestValidateHeaderFileSizeExceeded(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected error for file size exceeded")
+		t.Fatal("expected an error for file size exceeded")
 	}
 }
 
-// TestValidateHeaderEmptyFileName tests the `validateHeader` function to ensure it appropriately handles a header with an empty file name.
+// TestValidateHeaderEmptyFileName tests the `validateHeader` function to ensure it handles a header with an empty file name.
 func TestValidateHeaderEmptyFileName(t *testing.T) {
 	header := &protocol.Header{
 		TransferType: protocol.TransferTypeFile,
@@ -158,11 +177,11 @@ func TestValidateHeaderEmptyFileName(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected error for empty file name")
+		t.Fatal("expected an error for empty file name")
 	}
 }
 
-// TestValidateHeaderDirectorySizeValidation tests the `validateHeader` function to ensure it appropriately handles a directory header with size exceeding the maximum allowed.
+// TestValidateHeaderDirectorySizeValidation tests the `validateHeader` function to ensure it handles a directory header with size exceeding the maximum allowed.
 func TestValidateHeaderDirectorySizeValidation(t *testing.T) {
 	oldMaxDirSize := *maxDirectorySize
 	defer func() {
@@ -180,11 +199,11 @@ func TestValidateHeaderDirectorySizeValidation(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected error for directory size exceeded")
+		t.Fatal("expected an error for directory size exceeded")
 	}
 }
 
-// TestValidateHeaderValidFile tests the `validateHeader` function to ensure it appropriately validates a correct file header.
+// TestValidateHeaderValidFile tests the `validateHeader` function to ensure it validates a correct file header.
 func TestValidateHeaderValidFile(t *testing.T) {
 	base := t.TempDir()
 	oldDestDir := *destDir
@@ -203,7 +222,7 @@ func TestValidateHeaderValidFile(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err != nil {
-		t.Fatalf("unexpected error for valid header: %v", err)
+		t.Fatalf("unexpected an error for valid header: %v", err)
 	}
 }
 
@@ -235,10 +254,76 @@ func TestGetDirectoryStatsEmpty(t *testing.T) {
 	numClients, totalSize := getDirectoryStats()
 
 	if numClients != 0 {
-		t.Fatalf("expected 0 clients, got %d", numClients)
+		t.Fatalf("expected 0 clients in total, got %d", numClients)
 	}
 	if totalSize != 0 {
-		t.Fatalf("expected total size 0, got %d", totalSize)
+		t.Fatalf("expected the total size 0, got %d", totalSize)
+	}
+}
+
+// TestSendErrorResponseWriteFailure tests the `sendErrorResponse` function to ensure it logs an error when writing the response fails.
+func TestSendErrorResponseWriteFailure(t *testing.T) {
+	conn1, conn2 := net.Pipe()
+
+	// Intentionally close the connections to cause a write failure.
+	if err := conn1.Close(); err != nil {
+		t.Fatalf("failed to close `conn1`: %v", err)
+	}
+	if err := conn2.Close(); err != nil {
+		t.Fatalf("failed to close `conn2`: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	oldOutput := log.Writer()
+	oldFlags := log.Flags()
+	oldPrefix := log.Prefix()
+
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(oldOutput)
+		log.SetFlags(oldFlags)
+		log.SetPrefix(oldPrefix)
+	}()
+
+	sendErrorResponse(conn1, "test error")
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "Failed to send an error response to client") {
+		t.Fatalf("expected the log to contain 'Failed to send an error response to client', got: %q", logOutput)
+	}
+}
+
+// TestSendSuccessResponseWriteFailure tests the `sendSuccessResponse` function to ensure it logs an error when writing the response fails.
+func TestSendSuccessResponseWriteFailure(t *testing.T) {
+	conn1, conn2 := net.Pipe()
+
+	// Intentionally close the connections to cause a write failure.
+	if err := conn1.Close(); err != nil {
+		t.Fatalf("failed to close `conn1`: %v", err)
+	}
+	if err := conn2.Close(); err != nil {
+		t.Fatalf("failed to close `conn2`: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	oldOutput := log.Writer()
+	oldFlags := log.Flags()
+	oldPrefix := log.Prefix()
+
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(oldOutput)
+		log.SetFlags(oldFlags)
+		log.SetPrefix(oldPrefix)
+	}()
+
+	sendSuccessResponse(conn1, "test success")
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "Failed to send a success response to client") {
+		t.Fatalf("expected the log to contain 'Failed to send a success response to client', got: %q", logOutput)
 	}
 }
 
@@ -289,7 +374,7 @@ func TestResolveFilePathSkip(t *testing.T) {
 
 	_, err := resolveFilePath(filePath, StrategySkip)
 	if err == nil {
-		t.Fatal("expected error for skip strategy on existing file")
+		t.Fatal("expected an error for skip strategy on existing file")
 	}
 }
 

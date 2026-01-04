@@ -25,7 +25,7 @@ YELLOW = \033[33m
 CYAN = \033[36m
 
 .PHONY: all build client server clean fmt vet clean deps tidy lint install uninstall \
-	run-client run-server test test-sh test-large-directory-sh test-directory-limit-sh help
+	run-client run-server test cover test-sh test-large-directory-sh test-directory-limit-sh help
 
 all: fmt vet build
 
@@ -95,6 +95,10 @@ run-server: server
 test:
 	$(GOCMD) test -v -cover ./...
 
+cover:
+	$(GOCMD) test -coverprofile=coverage.out ./...
+	$(GOCMD) tool cover -html=coverage.out
+
 test-sh:
 	chmod +x test.sh
 	./test.sh
@@ -129,7 +133,8 @@ help:
 	@printf '  %-30s %s\n' 'uninstall' 'Uninstall client and server binaries from GOPATH/bin.'
 	@printf '  %-30s %s\n' 'run-client' 'Run the client binary with optional ARGS.'
 	@printf '  %-30s %s\n' 'run-server' 'Run the server binary with optional ARGS.'
-	@printf '  %-30s %s\n' 'test' 'Run GO tests.'
+	@printf '  %-30s %s\n' 'test' 'Run unit tests with coverage.'
+	@printf '  %-30s %s\n' 'cover' 'Run unit tests and generate coverage report.'
 	@printf '  %-30s %s\n' 'test-sh' 'Run test.sh script.'
 	@printf '  %-30s %s\n' 'test-large-directory-sh' 'Run test_large_directory.sh script.'
 	@printf '  %-30s %s\n' 'test-directory-limit-sh' 'Run test_directory_limit.sh script.'
