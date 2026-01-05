@@ -21,7 +21,7 @@ import (
 // Custom error types for better error handling.
 var (
 	ErrFileNotFound     = errors.New("file not found")
-	ErrFileTooLarge     = errors.New("file size exceeds maximum allowed size")
+	ErrFileTooLarge     = errors.New("file size exceeds the maximum allowed size")
 	ErrInvalidFilename  = errors.New("invalid filename")
 	ErrConnectionFailed = errors.New("connection failed")
 )
@@ -74,7 +74,7 @@ func validatePath(path string) error {
 	// For files, perform additional validation.
 	if !fileInfo.IsDir() {
 		if fileInfo.Size() > MaxFileSize {
-			return fmt.Errorf("%w: file size %d exceeds maximum allowed size %d",
+			return fmt.Errorf("%w: file size %d exceeds the maximum allowed size %d",
 				ErrFileTooLarge, fileInfo.Size(), MaxFileSize)
 		}
 

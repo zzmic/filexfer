@@ -24,8 +24,8 @@ import (
 var (
 	ErrInvalidFileSize   = errors.New("invalid file size")
 	ErrEmptyFilename     = errors.New("empty file name")
-	ErrFileTooLarge      = errors.New("file size exceeds maximum allowed size")
-	ErrDirectoryTooLarge = errors.New("directory transfer size exceeds maximum allowed size")
+	ErrFileTooLarge      = errors.New("file size exceeds the maximum allowed size")
+	ErrDirectoryTooLarge = errors.New("directory transfer size exceeds the maximum allowed size")
 )
 
 // Constants for file conflict-resolution strategies.

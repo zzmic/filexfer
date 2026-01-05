@@ -34,11 +34,11 @@ const (
 var (
 	ErrInvalidFileSize      = errors.New("invalid file size in header")
 	ErrInvalidFileName      = errors.New("invalid filename in header")
-	ErrFileNameTooLong      = errors.New("filename length exceeds maximum allowed size")
+	ErrFileNameTooLong      = errors.New("filename length exceeds the maximum allowed size")
 	ErrInvalidChecksum      = errors.New("invalid checksum in header")
 	ErrChecksumMismatch     = errors.New("checksum mismatch in header")
 	ErrInvalidDirectoryPath = errors.New("invalid directory path in header")
-	ErrDirectoryPathTooLong = errors.New("directory path length exceeds maximum allowed size")
+	ErrDirectoryPathTooLong = errors.New("directory path length exceeds the maximum allowed size")
 	ErrInvalidTransferType  = errors.New("invalid transfer type in header")
 	ErrInvalidMessageType   = errors.New("invalid message type in header")
 )
@@ -70,7 +70,7 @@ func validateHeader(header *Header) error {
 	}
 
 	if len(header.FileName) > MaxFileNameLength {
-		return fmt.Errorf("%w: filename length %d exceeds maximum %d",
+		return fmt.Errorf("%w: filename length %d exceeds the maximum %d",
 			ErrFileNameTooLong, len(header.FileName), MaxFileNameLength)
 	}
 
@@ -93,7 +93,7 @@ func validateHeader(header *Header) error {
 	}
 
 	if header.TransferType == TransferTypeDirectory && len(header.DirectoryPath) > MaxDirPathLength {
-		return fmt.Errorf("%w: directory path length %d exceeds maximum %d",
+		return fmt.Errorf("%w: directory path length %d exceeds the maximum %d",
 			ErrDirectoryPathTooLong, len(header.DirectoryPath), MaxDirPathLength)
 	}
 
@@ -167,9 +167,9 @@ func ReadHeader(r io.Reader) (*Header, error) {
 	n, err := io.ReadFull(r, messageTypeBytes)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, fmt.Errorf("unexpected end of stream while reading message type: %w", err)
+			return nil, fmt.Errorf("unexpected end of stream while reading the message type: %w", err)
 		}
-		return nil, fmt.Errorf("failed to read message type: %w", err)
+		return nil, fmt.Errorf("failed to read the message type: %w", err)
 	}
 	if n != 1 {
 		return nil, fmt.Errorf("incomplete message type read: got %d bytes, expected 1", n)
@@ -196,7 +196,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 
 	// Validate file name length to prevent abuse.
 	if fileNameLength > MaxFileNameLength {
-		return nil, fmt.Errorf("%w: filename length %d exceeds maximum %d",
+		return nil, fmt.Errorf("%w: filename length %d exceeds the maximum %d",
 			ErrFileNameTooLong, fileNameLength, MaxFileNameLength)
 	}
 
@@ -256,7 +256,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 
 	// Validate directory path length to prevent abuse.
 	if dirPathLength > MaxDirPathLength {
-		return nil, fmt.Errorf("%w: directory path length %d exceeds maximum %d",
+		return nil, fmt.Errorf("%w: directory path length %d exceeds the maximum %d",
 			ErrDirectoryPathTooLong, dirPathLength, MaxDirPathLength)
 	}
 

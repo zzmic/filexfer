@@ -16,7 +16,7 @@ const (
 // Custom error types for response errors.
 var (
 	ErrInvalidResponseStatus = errors.New("invalid response status")
-	ErrInvalidMessageLength  = errors.New("invalid message length in response")
+	ErrInvalidMessageLength  = errors.New("invalid message length in the response")
 )
 
 // MaxResponseMessageLength is the maximum allowed response message length (64KB).
@@ -38,24 +38,24 @@ func WriteResponse(w io.Writer, status uint8, message string) error {
 	messageLength := uint32(len(messageBytes))
 
 	if messageLength > MaxResponseMessageLength {
-		return fmt.Errorf("%w: message length %d exceeds maximum %d",
+		return fmt.Errorf("%w: message length %d exceeds the maximum %d",
 			ErrInvalidMessageLength, messageLength, MaxResponseMessageLength)
 	}
 
 	// Write the status byte (1 byte).
 	if _, err := w.Write([]byte{status}); err != nil {
-		return fmt.Errorf("failed to write response status: %w", err)
+		return fmt.Errorf("failed to write the response status: %w", err)
 	}
 
 	// Write the message length (4 bytes, big-endian).
 	if err := binary.Write(w, binary.BigEndian, messageLength); err != nil {
-		return fmt.Errorf("failed to write message length: %w", err)
+		return fmt.Errorf("failed to write the message length: %w", err)
 	}
 
 	// Write the message bytes (variable length).
 	if messageLength > 0 {
 		if _, err := w.Write(messageBytes); err != nil {
-			return fmt.Errorf("failed to write message: %w", err)
+			return fmt.Errorf("failed to write the message: %w", err)
 		}
 	}
 
@@ -71,15 +71,12 @@ func ReadResponse(r io.Reader) (status uint8, message string, err error) {
 
 	// Read the status byte (1 byte).
 	statusBytes := make([]byte, 1)
-	n, err := io.ReadFull(r, statusBytes)
+	_, err = io.ReadFull(r, statusBytes)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return 0, "", fmt.Errorf("unexpected end of stream while reading response status: %w", err)
+			return 0, "", fmt.Errorf("unexpected end of stream while reading the response status: %w", err)
 		}
-		return 0, "", fmt.Errorf("failed to read response status: %w", err)
-	}
-	if n != 1 {
-		return 0, "", fmt.Errorf("incomplete status read: got %d bytes, expected 1", n)
+		return 0, "", fmt.Errorf("failed to read the response status: %w", err)
 	}
 	status = statusBytes[0]
 
@@ -90,32 +87,29 @@ func ReadResponse(r io.Reader) (status uint8, message string, err error) {
 
 	// Read the message length (4 bytes, big-endian).
 	var messageLength uint32
-	if err := binary.Read(r, binary.BigEndian, &messageLength); err != nil {
+	if err = binary.Read(r, binary.BigEndian, &messageLength); err != nil {
 		if errors.Is(err, io.EOF) {
-			return 0, "", fmt.Errorf("unexpected end of stream while reading message length: %w", err)
+			return 0, "", fmt.Errorf("unexpected end of stream while reading the message length: %w", err)
 		}
-		return 0, "", fmt.Errorf("failed to read message length: %w", err)
+		return 0, "", fmt.Errorf("failed to read the message length: %w", err)
 	}
 
-	// Validate message length to prevent abuse.
+	// Validate message length to prevent excessive memory allocation.
 	if messageLength > MaxResponseMessageLength {
-		return 0, "", fmt.Errorf("%w: message length %d exceeds maximum %d",
+		return 0, "", fmt.Errorf("%w: message length %d exceeds the maximum %d",
 			ErrInvalidMessageLength, messageLength, MaxResponseMessageLength)
 	}
 
 	// Read the message (variable length).
 	messageBytes := make([]byte, messageLength)
 	if messageLength > 0 {
-		n, err = io.ReadFull(r, messageBytes)
+		_, err = io.ReadFull(r, messageBytes)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return 0, "", fmt.Errorf("unexpected end of stream while reading message: got %d bytes, expected %d: %w",
-					n, messageLength, err)
+				return 0, "", fmt.Errorf("unexpected end of stream while reading the message: got %d bytes, expected %d: %w",
+					len(messageBytes), messageLength, err)
 			}
-			return 0, "", fmt.Errorf("failed to read message: %w", err)
-		}
-		if n != int(messageLength) {
-			return 0, "", fmt.Errorf("incomplete message read: got %d bytes, expected %d", n, messageLength)
+			return 0, "", fmt.Errorf("failed to read the message: %w", err)
 		}
 	}
 	message = string(messageBytes)

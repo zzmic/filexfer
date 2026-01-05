@@ -9,8 +9,8 @@ import (
 
 // FailingReader is a test helper that simulates read failures.
 type FailingReader struct {
-	failAfter int
-	read      int
+	failAfter int // Number of bytes after which to fail.
+	read      int // Number of bytes read so far.
 }
 
 // FailingRead implements the `io.Reader` interface and fails after reading `failAfter` bytes.
@@ -29,10 +29,10 @@ func TestCalculateFileChecksumNilFile(t *testing.T) {
 	got, err := CalculateFileChecksum(nil)
 
 	if err == nil {
-		t.Errorf("expected error for a nil file reader, got nil")
+		t.Errorf("expected error for the nil file reader, got nil")
 	}
 	if got != nil {
-		t.Errorf("expected nil checksum for a nil file reader, got %x", got)
+		t.Errorf("expected nil checksum for the nil file reader, got %x", got)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestCalculateFileChecksumReadError(t *testing.T) {
 	got, err := CalculateFileChecksum(failingReader)
 
 	if err == nil {
-		t.Errorf("expected error for a failing reader, got nil")
+		t.Errorf("expected error for the failing reader, got nil")
 	}
 	if got != nil {
 		t.Errorf("expected nil checksum on an error, got %x", got)
