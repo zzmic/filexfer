@@ -82,42 +82,15 @@ func sanitizePath(baseDir, userPath string) (string, error) {
 	if userPath == "" {
 		return "", fmt.Errorf("path cannot be empty")
 	}
-
 	if filepath.IsAbs(userPath) {
 		return "", fmt.Errorf("absolute paths are not allowed: %s", userPath)
 	}
-
 	if strings.Contains(userPath, "..") {
 		return "", fmt.Errorf("parent directory traversal is not allowed: %s", userPath)
 	}
 
 	baseDir = filepath.Clean(baseDir)
-
-	absBase, err := filepath.Abs(baseDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve base directory: %v", err)
-	}
-
 	fullPath := filepath.Clean(filepath.Join(baseDir, userPath))
-
-	absFull, err := filepath.Abs(fullPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve full path: %v", err)
-	}
-
-	relPath, err := filepath.Rel(absBase, absFull)
-	if err != nil {
-		return "", fmt.Errorf("failed to compute relative path: %v", err)
-	}
-
-	if strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || relPath == ".." {
-		return "", fmt.Errorf("path traversal attempt detected: %s escapes the base directory", userPath)
-	}
-
-	if !strings.HasPrefix(absFull+string(filepath.Separator), absBase+string(filepath.Separator)) && absFull != absBase {
-		return "", fmt.Errorf("path is outside the base directory: %s", userPath)
-	}
-
 	return fullPath, nil
 }
 
@@ -130,7 +103,7 @@ func validateHeader(header *protocol.Header, clientAddr string) error {
 	if header.TransferType == protocol.TransferTypeDirectory {
 		if header.MessageType == protocol.MessageTypeValidate {
 			if header.FileSize > *maxDirectorySize {
-				return fmt.Errorf("%w: directory size %d bytes exceeds maximum allowed size %d bytes",
+				return fmt.Errorf("%w: directory size %d bytes exceeds the maximum allowed size %d bytes",
 					ErrDirectoryTooLarge, header.FileSize, *maxDirectorySize)
 			}
 			return nil
@@ -142,13 +115,13 @@ func validateHeader(header *protocol.Header, clientAddr string) error {
 		dirSizeMutex.RUnlock()
 
 		if newTotalSize > *maxDirectorySize {
-			return fmt.Errorf("%w: directory transfer size %d bytes would exceed maximum allowed size %d bytes (current: %d bytes, adding: %d bytes, expected total: %d bytes, exceeds by: %d bytes)",
+			return fmt.Errorf("%w: directory transfer size %d bytes would exceed the maximum allowed size %d bytes (current: %d bytes, adding: %d bytes, expected total: %d bytes, exceeds by: %d bytes)",
 				ErrDirectoryTooLarge, newTotalSize, *maxDirectorySize, currentDirSize, header.FileSize, newTotalSize, newTotalSize-*maxDirectorySize)
 		}
 	} else {
 		maxSize := uint64(MaxFileSize)
 		if header.FileSize > maxSize {
-			return fmt.Errorf("%w: file size %d bytes exceeds maximum allowed size %d bytes",
+			return fmt.Errorf("%w: file size %d bytes exceeds the maximum allowed size %d bytes",
 				ErrFileTooLarge, header.FileSize, maxSize)
 		}
 	}
@@ -169,14 +142,14 @@ func validateHeader(header *protocol.Header, clientAddr string) error {
 // sendErrorResponse sends a structured error response to the client.
 func sendErrorResponse(conn net.Conn, message string) {
 	if err := protocol.WriteResponse(conn, protocol.ResponseStatusError, message); err != nil {
-		log.Printf("Failed to send an error response to client: %v", err)
+		log.Printf("Failed to send an error response to the client: %v", err)
 	}
 }
 
 // sendSuccessResponse sends a structured success response to the client.
 func sendSuccessResponse(conn net.Conn, message string) {
 	if err := protocol.WriteResponse(conn, protocol.ResponseStatusSuccess, message); err != nil {
-		log.Printf("Failed to send a success response to client: %v", err)
+		log.Printf("Failed to send a success response to the client: %v", err)
 	}
 }
 

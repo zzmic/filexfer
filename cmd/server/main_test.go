@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// TestSetupLogging tests the `setupLogging` function to ensure it configures structured logging.
+// TestSetupLogging tests the `setupLogging` function to ensure that it configures structured logging.
 func TestSetupLogging(t *testing.T) {
 	setupLogging()
 
@@ -27,7 +27,7 @@ func TestSetupLogging(t *testing.T) {
 	}
 }
 
-// TestToGB tests the `toGB` function to ensure it handles bytes to gigabytes conversion.
+// TestToGB tests the `toGB` function to ensure that it handles bytes to gigabytes conversion.
 func TestToGB(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -67,89 +67,121 @@ func TestToGB(t *testing.T) {
 	}
 }
 
-// TestSanitizePath tests the `sanitizePath` function to ensure it handles various path inputs, including attempts at, perhaps malicious or erroneous, directory traversal.
-func TestSanitizePath(t *testing.T) {
+// TestSanitizePathEmptyPath tests the `sanitizePath` function to ensure that it handles an empty user path.
+func TestSanitizePathEmptyPath(t *testing.T) {
 	base := t.TempDir()
+	userPath := ""
 
-	tests := []struct {
-		name         string
-		userPath     string
-		expectedPath string
-		errExpected  bool
-	}{
-		{
-			name:         "basic file",
-			userPath:     "file.txt",
-			expectedPath: filepath.Join(base, "file.txt"),
-		},
-		{
-			name:         "nested path",
-			userPath:     "dir/sub/file.txt",
-			expectedPath: filepath.Join(base, "dir", "sub", "file.txt"),
-		},
-		{
-			name:         "dot segment",
-			userPath:     "dir/./file.txt",
-			expectedPath: filepath.Join(base, "dir", "file.txt"),
-		},
-		{
-			name:        "empty path",
-			userPath:    "",
-			errExpected: true,
-		},
-		{
-			name:        "absolute path",
-			userPath:    filepath.Join(string(filepath.Separator), "etc", "passwd"),
-			errExpected: true,
-		},
-		{
-			name:        "parent traversal unix style",
-			userPath:    "../etc/passwd",
-			errExpected: true,
-		},
-		{
-			name:        "parent traversal mixed separators",
-			userPath:    "dir/../secret.txt",
-			errExpected: true,
-		},
-		{
-			name:        "parent traversal backslash",
-			userPath:    "dir\\..\\secret.txt",
-			errExpected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := sanitizePath(base, tt.userPath)
-
-			if tt.errExpected {
-				if err == nil {
-					t.Fatalf("`sanitizePath(...)` error = nil, expected error")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("`sanitizePath(...)` unexpected error = %v", err)
-			}
-
-			if got != tt.expectedPath {
-				t.Fatalf("`sanitizePath(...)` = %q, expected %q", got, tt.expectedPath)
-			}
-		})
+	_, err := sanitizePath(base, userPath)
+	if err == nil {
+		t.Fatalf("expected an error for empty user path")
 	}
 }
 
-// TestValidateHeaderNilHeader tests the `validateHeader` function to ensure it handles a nil header.
+func TestSanitizePathBasicPath(t *testing.T) {
+	base := t.TempDir()
+	userPath := "file.txt"
+	expectedPath := filepath.Join(base, "file.txt")
+
+	got, err := sanitizePath(base, userPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != expectedPath {
+		t.Fatalf("expected %q, got %q", expectedPath, got)
+	}
+
+	userPath = "dir"
+	expectedPath = filepath.Join(base, "dir")
+
+	got, err = sanitizePath(base, userPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != expectedPath {
+		t.Fatalf("expected %q, got %q", expectedPath, got)
+	}
+}
+
+func TestSanitizePathNestedPath(t *testing.T) {
+	base := t.TempDir()
+	userPath := "dir/subdir/file.txt"
+	expectedPath := filepath.Join(base, "dir", "subdir", "file.txt")
+
+	got, err := sanitizePath(base, userPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != expectedPath {
+		t.Fatalf("expected %q, got %q", expectedPath, got)
+	}
+}
+
+func TestSanitizePathDotSegments(t *testing.T) {
+	base := t.TempDir()
+	userPath := "dir/./subdir/./file.txt"
+	expectedPath := filepath.Join(base, "dir", "subdir", "file.txt")
+
+	got, err := sanitizePath(base, userPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != expectedPath {
+		t.Fatalf("expected %q, got %q", expectedPath, got)
+	}
+}
+
+func TestSanitizePathAbsolutePath(t *testing.T) {
+	base := t.TempDir()
+	userPath := string(filepath.Separator) + "etc" + string(filepath.Separator) + "passwd"
+
+	_, err := sanitizePath(base, userPath)
+	if err == nil {
+		t.Fatal("expected an error for absolute path")
+	}
+
+}
+
+func TestSanitizePathUnixStylePathTraversal(t *testing.T) {
+	base := t.TempDir()
+	userPath := "dir/../secret.txt"
+
+	_, err := sanitizePath(base, userPath)
+	if err == nil {
+		t.Fatal("expected an error for unix style path traversal")
+	}
+}
+
+func TestSanitizePathBackslashPathTraversal(t *testing.T) {
+	base := t.TempDir()
+	userPath := "dir\\..\\secret.txt"
+
+	_, err := sanitizePath(base, userPath)
+	if err == nil {
+		t.Fatal("expected an error for backslash path traversal")
+	}
+}
+
+func TestSanitizePathMixedPathTraversal(t *testing.T) {
+	base := t.TempDir()
+	userPath := "dir/..\\secret.txt"
+
+	_, err := sanitizePath(base, userPath)
+	if err == nil {
+		t.Fatal("expected an error for mixed path traversal")
+	}
+}
+
+// TestValidateHeaderNilHeader tests the `validateHeader` function to ensure that it handles a nil header.
 func TestValidateHeaderNilHeader(t *testing.T) {
 	err := validateHeader(nil, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected an error for nil header")
+		t.Fatal("expected an error for the nil header")
 	}
 }
 
-// TestValidateHeaderFileSizeExceeded tests the `validateHeader` function to ensure it handles a header with file size exceeding the maximum allowed.
+// TestValidateHeaderFileSizeExceeded tests the `validateHeader` function to ensure that
+// it handles a header with file size exceeding the maximum allowed.
 func TestValidateHeaderFileSizeExceeded(t *testing.T) {
 	header := &protocol.Header{
 		TransferType: protocol.TransferTypeFile,
@@ -161,11 +193,12 @@ func TestValidateHeaderFileSizeExceeded(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected an error for file size exceeded")
+		t.Fatal("expected an error for the exceeded file size")
 	}
 }
 
-// TestValidateHeaderEmptyFileName tests the `validateHeader` function to ensure it handles a header with an empty file name.
+// TestValidateHeaderEmptyFileName tests the `validateHeader` function to ensure that
+// it handles a header with an empty file name.
 func TestValidateHeaderEmptyFileName(t *testing.T) {
 	header := &protocol.Header{
 		TransferType: protocol.TransferTypeFile,
@@ -177,11 +210,29 @@ func TestValidateHeaderEmptyFileName(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected an error for empty file name")
+		t.Fatal("expected an error for the empty file name")
 	}
 }
 
-// TestValidateHeaderDirectorySizeValidation tests the `validateHeader` function to ensure it handles a directory header with size exceeding the maximum allowed.
+// TestValidateHeaderSanitizeFailure tests the `validateHeader` function to ensure that
+// it handles a header with a file name that fails sanitization.
+func TestValidateHeaderSanitizeFailure(t *testing.T) {
+	header := &protocol.Header{
+		TransferType: protocol.TransferTypeFile,
+		MessageType:  protocol.MessageTypeTransfer,
+		FileSize:     1024,
+		FileName:     "../secret.txt",
+		Checksum:     make([]byte, 32),
+	}
+
+	err := validateHeader(header, "127.0.0.1:12345")
+	if err == nil {
+		t.Fatal("expected an error for failing to sanitize the file name")
+	}
+}
+
+// TestValidateHeaderDirectorySizeValidation tests the `validateHeader` function to ensure that
+// it handles a directory header with size exceeding the maximum allowed.
 func TestValidateHeaderDirectorySizeValidation(t *testing.T) {
 	oldMaxDirSize := *maxDirectorySize
 	defer func() {
@@ -201,9 +252,93 @@ func TestValidateHeaderDirectorySizeValidation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for directory size exceeded")
 	}
+
+	header = &protocol.Header{
+		TransferType: protocol.TransferTypeDirectory,
+		MessageType:  protocol.MessageTypeValidate,
+		FileSize:     50 * 1024 * 1024,
+		FileName:     "",
+		Checksum:     make([]byte, 32),
+	}
+
+	err = validateHeader(header, "127.0.0.1:12345")
+	if err != nil {
+		t.Fatalf("unexpected an error for valid directory size: %v", err)
+	}
 }
 
-// TestValidateHeaderValidFile tests the `validateHeader` function to ensure it validates a correct file header.
+// TestValidateHeaderDirectorySizeExceededOnTransfer tests the `validateHeader` function to ensure that
+// it rejects a directory transfer if the cumulative size would exceed the limit.
+func TestValidateHeaderDirectorySizeExceededOnTransfer(t *testing.T) {
+	oldMaxDirSize := *maxDirectorySize
+	defer func() {
+		*maxDirectorySize = oldMaxDirSize
+	}()
+	*maxDirectorySize = 1000
+
+	clientAddr := "127.0.0.1:12345"
+	dirSizeMutex.Lock()
+	directorySizes = make(map[string]uint64)
+	directorySizes[clientAddr] = 600
+	dirSizeMutex.Unlock()
+	defer func() {
+		dirSizeMutex.Lock()
+		delete(directorySizes, clientAddr)
+		dirSizeMutex.Unlock()
+	}()
+
+	header := &protocol.Header{
+		TransferType: protocol.TransferTypeDirectory,
+		MessageType:  protocol.MessageTypeTransfer,
+		FileSize:     500, // 600 + 500 = 1100, which exceeds 1000.
+		FileName:     "file.txt",
+		Checksum:     make([]byte, 32),
+	}
+
+	err := validateHeader(header, clientAddr)
+	if err == nil {
+		t.Fatal("expected an error for the exceeded directory size on transfer")
+	}
+	if !strings.Contains(err.Error(), "would exceed the maximum allowed size") {
+		t.Fatalf("expected 'would exceed' error, got: %v", err)
+	}
+}
+
+// TestValidateHeaderDirectorySizeAcceptedOnTransfer tests the `validateHeader` function to ensure that
+// it accepts a directory transfer if the cumulative size is within the limit.
+func TestValidateHeaderDirectorySizeAcceptedOnTransfer(t *testing.T) {
+	oldMaxDirSize := *maxDirectorySize
+	defer func() {
+		*maxDirectorySize = oldMaxDirSize
+	}()
+	*maxDirectorySize = 1000
+
+	clientAddr := "127.0.0.1:12345"
+	dirSizeMutex.Lock()
+	directorySizes = make(map[string]uint64)
+	directorySizes[clientAddr] = 600
+	dirSizeMutex.Unlock()
+	defer func() {
+		dirSizeMutex.Lock()
+		delete(directorySizes, clientAddr)
+		dirSizeMutex.Unlock()
+	}()
+
+	header := &protocol.Header{
+		TransferType: protocol.TransferTypeDirectory,
+		MessageType:  protocol.MessageTypeTransfer,
+		FileSize:     300, // 600 + 300 = 900, which is within 1000.
+		FileName:     "file.txt",
+		Checksum:     make([]byte, 32),
+	}
+
+	err := validateHeader(header, clientAddr)
+	if err != nil {
+		t.Fatalf("unexpected error for a valid directory size on transfer: %v", err)
+	}
+}
+
+// TestValidateHeaderValidFile tests the `validateHeader` function to ensure that it validates a correct file header.
 func TestValidateHeaderValidFile(t *testing.T) {
 	base := t.TempDir()
 	oldDestDir := *destDir
@@ -226,7 +361,7 @@ func TestValidateHeaderValidFile(t *testing.T) {
 	}
 }
 
-// TestGetDirectoryStatsNonEmpty tests the `getDirectoryStats` function to ensure it correctly calculates the number of clients and total directory size.
+// TestGetDirectoryStatsNonEmpty tests the `getDirectoryStats` function to ensure that it calculates the number of clients and total directory size.
 func TestGetDirectoryStatsNonEmpty(t *testing.T) {
 	dirSizeMutex.Lock()
 	directorySizes = make(map[string]uint64)
@@ -245,7 +380,7 @@ func TestGetDirectoryStatsNonEmpty(t *testing.T) {
 	}
 }
 
-// TestGetDirectoryStatsEmpty tests the `getDirectoryStats` function to ensure it correctly handles an empty `directorySizes` map.
+// TestGetDirectoryStatsEmpty tests the `getDirectoryStats` function to ensure that it handles an empty `directorySizes` map.
 func TestGetDirectoryStatsEmpty(t *testing.T) {
 	dirSizeMutex.Lock()
 	directorySizes = make(map[string]uint64)
@@ -261,7 +396,7 @@ func TestGetDirectoryStatsEmpty(t *testing.T) {
 	}
 }
 
-// TestSendErrorResponseWriteFailure tests the `sendErrorResponse` function to ensure it logs an error when writing the response fails.
+// TestSendErrorResponseWriteFailure tests the `sendErrorResponse` function to ensure that it logs an error when writing the response fails.
 func TestSendErrorResponseWriteFailure(t *testing.T) {
 	conn1, conn2 := net.Pipe()
 
@@ -289,12 +424,12 @@ func TestSendErrorResponseWriteFailure(t *testing.T) {
 	sendErrorResponse(conn1, "test error")
 
 	logOutput := logBuf.String()
-	if !strings.Contains(logOutput, "Failed to send an error response to client") {
-		t.Fatalf("expected the log to contain 'Failed to send an error response to client', got: %q", logOutput)
+	if !strings.Contains(logOutput, "Failed to send an error response to the client") {
+		t.Fatalf("expected the log to contain 'Failed to send an error response to the client', got: %q", logOutput)
 	}
 }
 
-// TestSendSuccessResponseWriteFailure tests the `sendSuccessResponse` function to ensure it logs an error when writing the response fails.
+// TestSendSuccessResponseWriteFailure tests the `sendSuccessResponse` function to ensure that it logs an error when writing the response fails.
 func TestSendSuccessResponseWriteFailure(t *testing.T) {
 	conn1, conn2 := net.Pipe()
 
@@ -322,12 +457,12 @@ func TestSendSuccessResponseWriteFailure(t *testing.T) {
 	sendSuccessResponse(conn1, "test success")
 
 	logOutput := logBuf.String()
-	if !strings.Contains(logOutput, "Failed to send a success response to client") {
-		t.Fatalf("expected the log to contain 'Failed to send a success response to client', got: %q", logOutput)
+	if !strings.Contains(logOutput, "Failed to send a success response to the client") {
+		t.Fatalf("expected the log to contain 'Failed to send a success response to the client', got: %q", logOutput)
 	}
 }
 
-// TestResolveFilePathNonExistent tests the `resolveFilePath` function to ensure it correctly handles a non-existent file path.
+// TestResolveFilePathNonExistent tests the `resolveFilePath` function to ensure that it handles a non-existent file path.
 func TestResolveFilePathNonExistent(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "newfile.txt")
@@ -341,7 +476,7 @@ func TestResolveFilePathNonExistent(t *testing.T) {
 	}
 }
 
-// TestResolveFilePathOverwrite tests the `resolveFilePath` function to ensure it correctly handles an existing file path with the overwrite strategy.
+// TestResolveFilePathOverwrite tests the `resolveFilePath` function to ensure that it handles an existing file path with the overwrite strategy.
 func TestResolveFilePathOverwrite(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "existing.txt")
@@ -363,7 +498,7 @@ func TestResolveFilePathOverwrite(t *testing.T) {
 	}
 }
 
-// TestResolveFilePathRename tests the `resolveFilePath` function to ensure it correctly handles an existing file path with the rename strategy.
+// TestResolveFilePathRename tests the `resolveFilePath` function to ensure that it handles an existing file path with the rename strategy.
 func TestResolveFilePathSkip(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "existing.txt")
@@ -374,11 +509,29 @@ func TestResolveFilePathSkip(t *testing.T) {
 
 	_, err := resolveFilePath(filePath, StrategySkip)
 	if err == nil {
-		t.Fatal("expected an error for skip strategy on existing file")
+		t.Fatal("expected an error for the skip strategy on an existing file")
 	}
 }
 
-// TestGenerateUniqueFile tests the `generateUniqueFile` function to ensure it generates a unique file name when a conflict exists.
+// TestResolveFilePathUnknownStrategy tests the `resolveFilePath` function to ensure that it handles an unknown strategy.
+func TestResolveFilePathUnknownStrategy(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "existing.txt")
+
+	if err := os.WriteFile(filePath, []byte("content"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	_, err := resolveFilePath(filePath, "invalid-strategy")
+	if err == nil {
+		t.Fatal("expected an error for an unknown strategy")
+	}
+	if !strings.Contains(err.Error(), "unknown file conflict-resolution strategy") {
+		t.Fatalf("expected 'unknown file conflict-resolution strategy' error, got: %v", err)
+	}
+}
+
+// TestGenerateUniqueFile tests the `generateUniqueFile` function to ensure that it generates a unique file name when a conflict exists.
 func TestGenerateUniqueFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "file.txt")
@@ -407,7 +560,7 @@ func TestGenerateUniqueFile(t *testing.T) {
 	}
 }
 
-// TestGenerateUniqueFileWithExisting tests the `generateUniqueFile` function to ensure it generates a unique file name when the original file already exists.
+// TestGenerateUniqueFileWithExisting tests the `generateUniqueFile` function to ensure that it generates a unique file name when the original file already exists.
 func TestGenerateUniqueFileWithExisting(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "file.txt")
@@ -436,7 +589,7 @@ func TestGenerateUniqueFileWithExisting(t *testing.T) {
 	}
 }
 
-// TestGenerateUniqueFileMultipleConflicts tests the `generateUniqueFile` function to ensure it generates a unique file name when the original file already exists.
+// TestGenerateUniqueFileMultipleConflicts tests the `generateUniqueFile` function to ensure that it generates a unique file name when the original file already exists.
 func TestGenerateUniqueFileMultipleConflicts(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "file.txt")
