@@ -93,7 +93,7 @@ run-server: server
 	./$(SERVER_BINARY) $(ARGS)
 
 test:
-	$(GOCMD) test -v -cover ./...
+	$(GOCMD) test -v ./...
 
 cover:
 	$(GOCMD) test -coverprofile=coverage.out ./...
@@ -133,7 +133,7 @@ help:
 	@printf '  %-30s %s\n' 'uninstall' 'Uninstall client and server binaries from GOPATH/bin.'
 	@printf '  %-30s %s\n' 'run-client' 'Run the client binary with optional ARGS.'
 	@printf '  %-30s %s\n' 'run-server' 'Run the server binary with optional ARGS.'
-	@printf '  %-30s %s\n' 'test' 'Run unit tests with coverage.'
+	@printf '  %-30s %s\n' 'test' 'Run unit tests.'
 	@printf '  %-30s %s\n' 'cover' 'Run unit tests and generate coverage report.'
 	@printf '  %-30s %s\n' 'test-sh' 'Run test.sh script.'
 	@printf '  %-30s %s\n' 'test-large-directory-sh' 'Run test_large_directory.sh script.'

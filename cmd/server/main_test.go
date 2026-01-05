@@ -15,7 +15,7 @@ import (
 )
 
 // TestSetupLogging tests the `setupLogging` function to ensure that
-// it configures structured logging.
+// it expectedly configures structured logging.
 func TestSetupLogging(t *testing.T) {
 	setupLogging()
 
@@ -31,7 +31,7 @@ func TestSetupLogging(t *testing.T) {
 }
 
 // TestToGB tests the `toGB` function to ensure that
-// it handles bytes to gigabytes conversion.
+// it expectedly converts bytes to gigabytes.
 func TestToGB(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -72,7 +72,7 @@ func TestToGB(t *testing.T) {
 }
 
 // TestSanitizePathEmptyPath tests the `sanitizePath` function to ensure that
-// it handles an empty user path.
+// it expectedly handles an empty user path.
 func TestSanitizePathEmptyPath(t *testing.T) {
 	base := t.TempDir()
 	userPath := ""
@@ -111,7 +111,7 @@ func TestSanitizePathBasicPath(t *testing.T) {
 }
 
 // TestSanitizePathNestedPath tests the `sanitizePath` function to ensure that
-// it handles nested file and directory paths.
+// it expectedly handles nested file and directory paths.
 func TestSanitizePathNestedPath(t *testing.T) {
 	base := t.TempDir()
 	userPath := "dir/subdir/file.txt"
@@ -127,7 +127,7 @@ func TestSanitizePathNestedPath(t *testing.T) {
 }
 
 // TestSanitizePathDotSegments tests the `sanitizePath` function to ensure that
-// it handles paths with dot segments.
+// it expectedly handles paths with dot segments.
 func TestSanitizePathDotSegments(t *testing.T) {
 	base := t.TempDir()
 	userPath := "dir/./subdir/./file.txt"
@@ -143,7 +143,7 @@ func TestSanitizePathDotSegments(t *testing.T) {
 }
 
 // TestSanitizePathAbsolutePath tests the `sanitizePath` function to ensure that
-// it rejects absolute paths.
+// it expectedly rejects absolute paths.
 func TestSanitizePathAbsolutePath(t *testing.T) {
 	base := t.TempDir()
 	userPath := string(filepath.Separator) + "etc" + string(filepath.Separator) + "passwd"
@@ -156,7 +156,7 @@ func TestSanitizePathAbsolutePath(t *testing.T) {
 }
 
 // TestSanitizePathUnixStylePathTraversal tests the `sanitizePath` function to ensure that
-// it rejects unix-style path traversal attempts.
+// it expectedly rejects unix-style path traversal attempts.
 func TestSanitizePathUnixStylePathTraversal(t *testing.T) {
 	base := t.TempDir()
 	userPath := "dir/../secret.txt"
@@ -168,7 +168,7 @@ func TestSanitizePathUnixStylePathTraversal(t *testing.T) {
 }
 
 // TestSanitizePathBackslashPathTraversal tests the `sanitizePath` function to ensure that
-// it rejects backslash path traversal attempts.
+// it expectedly rejects backslash path traversal attempts.
 func TestSanitizePathBackslashPathTraversal(t *testing.T) {
 	base := t.TempDir()
 	userPath := "dir\\..\\secret.txt"
@@ -180,7 +180,7 @@ func TestSanitizePathBackslashPathTraversal(t *testing.T) {
 }
 
 // TestSanitizePathMixedPathTraversal tests the `sanitizePath` function to ensure that
-// it rejects mixed path traversal attempts.
+// it expectedly rejects mixed path traversal attempts.
 func TestSanitizePathMixedPathTraversal(t *testing.T) {
 	base := t.TempDir()
 	userPath := "dir/..\\secret.txt"
@@ -192,7 +192,7 @@ func TestSanitizePathMixedPathTraversal(t *testing.T) {
 }
 
 // TestValidateHeaderNilHeader tests the `validateHeader` function to ensure that
-// it handles a nil header.
+// it expectedly handles a nil header.
 func TestValidateHeaderNilHeader(t *testing.T) {
 	err := validateHeader(nil, "127.0.0.1:12345")
 	if err == nil {
@@ -201,7 +201,7 @@ func TestValidateHeaderNilHeader(t *testing.T) {
 }
 
 // TestValidateHeaderFileSizeExceeded tests the `validateHeader` function to ensure that
-// it handles a header with file size exceeding the maximum allowed.
+// it expectedly handles a header with file size exceeding the maximum allowed.
 func TestValidateHeaderFileSizeExceeded(t *testing.T) {
 	header := &protocol.Header{
 		TransferType: protocol.TransferTypeFile,
@@ -218,7 +218,7 @@ func TestValidateHeaderFileSizeExceeded(t *testing.T) {
 }
 
 // TestValidateHeaderEmptyFileName tests the `validateHeader` function to ensure that
-// it handles a header with an empty file name.
+// it expectedly handles a header with an empty file name.
 func TestValidateHeaderEmptyFileName(t *testing.T) {
 	header := &protocol.Header{
 		TransferType: protocol.TransferTypeFile,
@@ -235,7 +235,7 @@ func TestValidateHeaderEmptyFileName(t *testing.T) {
 }
 
 // TestValidateHeaderSanitizeFailure tests the `validateHeader` function to ensure that
-// it handles a header with a file name that fails sanitization.
+// it expectedly handles a header with a file name that fails sanitization.
 func TestValidateHeaderSanitizeFailure(t *testing.T) {
 	header := &protocol.Header{
 		TransferType: protocol.TransferTypeFile,
@@ -252,7 +252,7 @@ func TestValidateHeaderSanitizeFailure(t *testing.T) {
 }
 
 // TestValidateHeaderDirectorySizeValidation tests the `validateHeader` function to ensure that
-// it handles a directory header with size exceeding the maximum allowed.
+// it expectedly handles a directory header with size exceeding the maximum allowed.
 func TestValidateHeaderDirectorySizeValidation(t *testing.T) {
 	oldMaxDirSize := *maxDirectorySize
 	defer func() {
@@ -288,7 +288,7 @@ func TestValidateHeaderDirectorySizeValidation(t *testing.T) {
 }
 
 // TestValidateHeaderDirectorySizeExceededOnTransfer tests the `validateHeader` function to ensure that
-// it rejects a directory transfer if the cumulative size would exceed the limit.
+// it expectedly rejects a directory transfer if the cumulative size would exceed the limit.
 func TestValidateHeaderDirectorySizeExceededOnTransfer(t *testing.T) {
 	oldMaxDirSize := *maxDirectorySize
 	defer func() {
@@ -325,7 +325,7 @@ func TestValidateHeaderDirectorySizeExceededOnTransfer(t *testing.T) {
 }
 
 // TestValidateHeaderDirectorySizeAcceptedOnTransfer tests the `validateHeader` function to ensure that
-// it accepts a directory transfer if the cumulative size is within the limit.
+// it expectedly accepts a directory transfer if the cumulative size is within the limit.
 func TestValidateHeaderDirectorySizeAcceptedOnTransfer(t *testing.T) {
 	oldMaxDirSize := *maxDirectorySize
 	defer func() {
@@ -359,7 +359,7 @@ func TestValidateHeaderDirectorySizeAcceptedOnTransfer(t *testing.T) {
 }
 
 // TestValidateHeaderValidFile tests the `validateHeader` function to ensure that
-// it validates a correct file header.
+// it expectedly validates a correct file header.
 func TestValidateHeaderValidFile(t *testing.T) {
 	base := t.TempDir()
 	oldDestDir := *destDir
@@ -383,7 +383,7 @@ func TestValidateHeaderValidFile(t *testing.T) {
 }
 
 // TestGetDirectoryStatsNonEmpty tests the `getDirectoryStats` function to ensure that
-// it calculates the number of clients and total directory size.
+// it expectedly calculates the number of clients and total directory size.
 func TestGetDirectoryStatsNonEmpty(t *testing.T) {
 	dirSizeMutex.Lock()
 	directorySizes = make(map[string]uint64)
@@ -403,7 +403,7 @@ func TestGetDirectoryStatsNonEmpty(t *testing.T) {
 }
 
 // TestGetDirectoryStatsEmpty tests the `getDirectoryStats` function to ensure that
-// it handles an empty `directorySizes` map.
+// it expectedly handles an empty `directorySizes` map.
 func TestGetDirectoryStatsEmpty(t *testing.T) {
 	dirSizeMutex.Lock()
 	directorySizes = make(map[string]uint64)
@@ -420,7 +420,7 @@ func TestGetDirectoryStatsEmpty(t *testing.T) {
 }
 
 // TestSendErrorResponseWriteFailure tests the `sendErrorResponse` function to ensure that
-// it logs an error when writing the response fails.
+// it expectedly logs an error when writing the response fails.
 func TestSendErrorResponseWriteFailure(t *testing.T) {
 	conn1, conn2 := net.Pipe()
 
@@ -454,7 +454,7 @@ func TestSendErrorResponseWriteFailure(t *testing.T) {
 }
 
 // TestSendSuccessResponseWriteFailure tests the `sendSuccessResponse` function to ensure that
-// it logs an error when writing the response fails.
+// it expectedly logs an error when writing the response fails.
 func TestSendSuccessResponseWriteFailure(t *testing.T) {
 	conn1, conn2 := net.Pipe()
 
@@ -488,7 +488,7 @@ func TestSendSuccessResponseWriteFailure(t *testing.T) {
 }
 
 // TestResolveFilePathNonExistent tests the `resolveFilePath` function to ensure that
-// it handles a non-existent file path.
+// it expectedly handles a non-existent file path.
 func TestResolveFilePathNonExistent(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "newfile.txt")
@@ -503,7 +503,7 @@ func TestResolveFilePathNonExistent(t *testing.T) {
 }
 
 // TestResolveFilePathOverwrite tests the `resolveFilePath` function to ensure that
-// it handles an existing file path with the overwrite strategy.
+// it expectedly handles an existing file path with the overwrite strategy.
 func TestResolveFilePathOverwrite(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "existing.txt")
@@ -526,7 +526,7 @@ func TestResolveFilePathOverwrite(t *testing.T) {
 }
 
 // TestResolveFilePathRename tests the `resolveFilePath` function to ensure that
-// it handles an existing file path with the rename strategy.
+// it expectedly handles an existing file path with the rename strategy.
 func TestResolveFilePathSkip(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "existing.txt")
@@ -542,7 +542,7 @@ func TestResolveFilePathSkip(t *testing.T) {
 }
 
 // TestResolveFilePathUnknownStrategy tests the `resolveFilePath` function to ensure that
-// it handles an unknown strategy.
+// it expectedly handles an unknown strategy.
 func TestResolveFilePathUnknownStrategy(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "existing.txt")
@@ -561,7 +561,7 @@ func TestResolveFilePathUnknownStrategy(t *testing.T) {
 }
 
 // TestGenerateUniqueFile tests the `generateUniqueFile` function to ensure that
-// it generates a unique file name when a conflict exists.
+// it expectedly generates a unique file name when a conflict exists.
 func TestGenerateUniqueFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "file.txt")
@@ -591,7 +591,7 @@ func TestGenerateUniqueFile(t *testing.T) {
 }
 
 // TestGenerateUniqueFileWithExisting tests the `generateUniqueFile` function to ensure that
-// it generates a unique file name when the original file already exists.
+// it expectedly generates a unique file name when the original file already exists.
 func TestGenerateUniqueFileWithExisting(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "file.txt")
@@ -621,7 +621,7 @@ func TestGenerateUniqueFileWithExisting(t *testing.T) {
 }
 
 // TestGenerateUniqueFileMultipleConflicts tests the `generateUniqueFile` function to ensure that
-// it generates a unique file name when the original file already exists.
+// it expectedly generates a unique file name when the original file already exists.
 func TestGenerateUniqueFileMultipleConflicts(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalPath := filepath.Join(tmpDir, "file.txt")
@@ -683,7 +683,7 @@ func TestReadContextCanceled(t *testing.T) {
 }
 
 // TestReadSuccess tests the `Read` method of the `contextReader` to ensure that
-// it reads data from the connection.
+// it expectedly reads data from the connection.
 func TestReadSuccess(t *testing.T) {
 	ctx := context.Background()
 
@@ -702,7 +702,7 @@ func TestReadSuccess(t *testing.T) {
 		conn: conn1,
 	}
 
-	testData := []byte("testdata")
+	testData := []byte("test data")
 	errChan := make(chan error, 1)
 	go func() {
 		_, err := conn2.Write(testData)
@@ -728,7 +728,7 @@ func TestReadSuccess(t *testing.T) {
 }
 
 // TestReadContextDeadlineExceeded tests the `Read` method of the `contextReader` to ensure that
-// it respects context deadlines.
+// it expectedly respects context deadlines.
 func TestReadContextDeadlineExceeded(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -764,7 +764,7 @@ func TestReadContextDeadlineExceeded(t *testing.T) {
 }
 
 // TestReadSetReadDeadlineFailure tests the `Read` method of the `contextReader` to ensure that
-// it handles `SetReadDeadline` failures.
+// it expectedly handles `SetReadDeadline` failures.
 func TestReadSetReadDeadlineFailure(t *testing.T) {
 	ctx := context.Background()
 

@@ -30,20 +30,6 @@ func CalculateDataChecksum(data []byte) []byte {
 	return hash.Sum(nil)
 }
 
-// VerifyDataChecksum verifies the SHA-256 checksum of data.
-func VerifyDataChecksum(data []byte, expectedChecksum []byte) error {
-	if expectedChecksum == nil {
-		return fmt.Errorf("expected checksum is nil")
-	}
-
-	actualChecksum := CalculateDataChecksum(data)
-	if !compareChecksums(actualChecksum, expectedChecksum) {
-		return fmt.Errorf("%w: expected %x, got %x", ErrChecksumMismatch, expectedChecksum, actualChecksum)
-	}
-
-	return nil
-}
-
 // compareChecksums compares two checksums.
 func compareChecksums(a, b []byte) bool {
 	if len(a) != len(b) {
@@ -57,4 +43,18 @@ func compareChecksums(a, b []byte) bool {
 	}
 
 	return true
+}
+
+// VerifyDataChecksum verifies the SHA-256 checksum of data.
+func VerifyDataChecksum(data []byte, expectedChecksum []byte) error {
+	if expectedChecksum == nil {
+		return fmt.Errorf("expected checksum is nil")
+	}
+
+	actualChecksum := CalculateDataChecksum(data)
+	if !compareChecksums(actualChecksum, expectedChecksum) {
+		return fmt.Errorf("%w: expected %x, got %x", ErrChecksumMismatch, expectedChecksum, actualChecksum)
+	}
+
+	return nil
 }
