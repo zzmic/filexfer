@@ -65,6 +65,24 @@ type contextReader struct {
 	conn net.Conn
 }
 
+// Read reads data from the connection with context cancellation support.
+// A deadline is set for each read operation to prevent hanging connections.
+func (cr *contextReader) Read(p []byte) (n int, err error) {
+	select {
+	// Return if the context is done (canceled or timed out).
+	case <-cr.ctx.Done():
+		return 0, cr.ctx.Err()
+	default:
+		// Do nothing.
+	}
+
+	if err := cr.conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
+		return 0, err
+	}
+
+	return cr.conn.Read(p)
+}
+
 // setupLogging configures structured logging with timestamps and custom prefix.
 func setupLogging() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
@@ -457,23 +475,6 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		// Continue to the next file transfer on the same connection.
 		// The loop will break when the client closes the connection or an error occurs.
 	}
-}
-
-// Read reads data from the connection with context cancellation support.
-func (cr *contextReader) Read(p []byte) (n int, err error) {
-	select {
-	// Return if the context is done (canceled or timed out).
-	case <-cr.ctx.Done():
-		return 0, cr.ctx.Err()
-	default:
-		// Do nothing.
-	}
-
-	if err := cr.conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
-		return 0, err
-	}
-
-	return cr.conn.Read(p)
 }
 
 func main() {
