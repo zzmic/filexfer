@@ -404,7 +404,7 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		teeReader := io.TeeReader(limitReader, hasher)
 
 		// Instantiate a `ProgressWriter` to track transfer progress.
-		progressWriter := protocol.NewProgressWriter(outputFile, int64(header.FileSize), fmt.Sprintf("Receiving %s", header.FileName))
+		progressWriter := protocol.NewProgressWriter(outputFile, header.FileSize, fmt.Sprintf("Receiving %s", header.FileName))
 
 		bytesWritten, err := io.Copy(progressWriter, teeReader)
 		if err != nil {

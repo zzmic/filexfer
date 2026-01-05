@@ -25,7 +25,7 @@ YELLOW = \033[33m
 CYAN = \033[36m
 
 .PHONY: all build client server clean fmt vet clean deps tidy lint install uninstall \
-	run-client run-server test cover test-sh test-large-directory-sh test-directory-limit-sh help
+	run-client run-server test test-verbose cover test-sh test-large-directory-sh test-directory-limit-sh help
 
 all: fmt vet build
 
@@ -93,6 +93,9 @@ run-server: server
 	./$(SERVER_BINARY) $(ARGS)
 
 test:
+	$(GOCMD) test ./...
+
+test-verbose:
 	$(GOCMD) test -v ./...
 
 cover:
@@ -134,6 +137,7 @@ help:
 	@printf '  %-30s %s\n' 'run-client' 'Run the client binary with optional ARGS.'
 	@printf '  %-30s %s\n' 'run-server' 'Run the server binary with optional ARGS.'
 	@printf '  %-30s %s\n' 'test' 'Run unit tests.'
+	@printf '  %-30s %s\n' 'test-verbose' 'Run unit tests with verbose output.'
 	@printf '  %-30s %s\n' 'cover' 'Run unit tests and generate coverage report.'
 	@printf '  %-30s %s\n' 'test-sh' 'Run test.sh script.'
 	@printf '  %-30s %s\n' 'test-large-directory-sh' 'Run test_large_directory.sh script.'
