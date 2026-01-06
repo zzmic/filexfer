@@ -142,7 +142,7 @@ func TestVerifyDataChecksumNilExpected(t *testing.T) {
 	err := VerifyDataChecksum([]byte("test data"), nil)
 
 	if err == nil {
-		t.Error("expected an error for a nil expected checksum")
+		t.Error("expected error for a nil expected checksum")
 	}
 	if !strings.Contains(err.Error(), "expected checksum is nil") {
 		t.Fatalf("expected 'expected checksum is nil' error, got: %v", err)
@@ -158,7 +158,7 @@ func TestVerifyDataChecksumMatching(t *testing.T) {
 	err := VerifyDataChecksum(testData, expectedChecksum)
 
 	if err != nil {
-		t.Fatalf("unexpected an error for matching checksums: %v", err)
+		t.Fatalf("unexpected error for matching checksums: %v", err)
 	}
 }
 
@@ -171,7 +171,7 @@ func TestVerifyDataChecksumMismatch(t *testing.T) {
 	err := VerifyDataChecksum(testData, wrongChecksum)
 
 	if err == nil {
-		t.Error("expected an error for mismatched checksums")
+		t.Error("expected error for mismatched checksums")
 	}
 	if !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("expected 'checksum mismatch' error, got: %v", err)

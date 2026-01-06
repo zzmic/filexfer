@@ -8,44 +8,41 @@ import (
 	"strings"
 )
 
-// Constants for protocol limits and sizes.
+// Constants for header validation.
 const (
-	// ChecksumSize is the fixed size for SHA-256 checksum (32 bytes).
-	ChecksumSize = 32
-	// MaxFileNameLength is the maximum allowed file name length (64KB).
-	MaxFileNameLength = 64 * 1024
-	// MaxDirPathLength is the maximum allowed directory path length (64KB).
-	MaxDirPathLength = 64 * 1024
+	ChecksumSize      = 32        // SHA-256 checksum size (32 bytes).
+	MaxFileNameLength = 64 * 1024 // Maximum allowed filename length (64KB).
+	MaxDirPathLength  = 64 * 1024 // Maximum allowed directory path length (64KB).
 )
 
-// Constants to represent the transfer types.
+// Constants for representing transfer types.
 const (
 	TransferTypeFile      = 0 // Transfer type for single file.
 	TransferTypeDirectory = 1 // Transfer type for directory.
 )
 
-// Constants to represent message types.
+// Constants for representing message types.
 const (
 	MessageTypeValidate = 1 // Message type for validation requests.
 	MessageTypeTransfer = 2 // Message type for file transfer requests.
 )
 
-// Custom error types for protocol errors.
+// Errors for header validation.
 var (
-	ErrInvalidFileSize      = errors.New("invalid file size in header")
-	ErrInvalidFileName      = errors.New("invalid filename in header")
+	ErrInvalidFileSize      = errors.New("invalid file size in the header")
+	ErrInvalidFileName      = errors.New("invalid filename in the header")
 	ErrFileNameTooLong      = errors.New("filename length exceeds the maximum allowed size")
-	ErrInvalidChecksum      = errors.New("invalid checksum in header")
-	ErrChecksumMismatch     = errors.New("checksum mismatch in header")
-	ErrInvalidDirectoryPath = errors.New("invalid directory path in header")
+	ErrInvalidChecksum      = errors.New("invalid checksum in the header")
+	ErrChecksumMismatch     = errors.New("checksum mismatch in the header")
+	ErrInvalidDirectoryPath = errors.New("invalid directory path in the header")
 	ErrDirectoryPathTooLong = errors.New("directory path length exceeds the maximum allowed size")
-	ErrInvalidTransferType  = errors.New("invalid transfer type in header")
-	ErrInvalidMessageType   = errors.New("invalid message type in header")
+	ErrInvalidTransferType  = errors.New("invalid transfer type in the header")
+	ErrInvalidMessageType   = errors.New("invalid message type in the header")
 )
 
-// A Header represents the file transfer header.
+// Header represents the protocol header for file transfers.
 type Header struct {
-	MessageType   uint8  // Message type (1 for Validate, 2 for Transfer).
+	MessageType   uint8  // Message type (1 for validation, 2 for transfer).
 	FileSize      uint64 // Size of the file or directory in bytes.
 	FileName      string // Name of the file or directory.
 	Checksum      []byte // SHA-256 checksum of the file or directory.
@@ -64,7 +61,7 @@ func validateHeader(header *Header) error {
 			ErrInvalidMessageType, header.MessageType, MessageTypeValidate, MessageTypeTransfer)
 	}
 
-	// `FileName` can be empty for validation messages.
+	// `FileName` is permitted to be empty for validation messages.
 	if header.MessageType == MessageTypeTransfer && header.FileName == "" {
 		return fmt.Errorf("%w: filename cannot be empty for transfer messages", ErrInvalidFileName)
 	}
@@ -112,45 +109,42 @@ func WriteHeader(w io.Writer, header *Header) error {
 
 	// Write the message type as a single byte.
 	if _, err := w.Write([]byte{header.MessageType}); err != nil {
-		return fmt.Errorf("failed to write message type: %w", err)
+		return fmt.Errorf("failed to write the message type: %w", err)
 	}
 
 	// Write the file size as 8 bytes in big-endian format.
 	if err := binary.Write(w, binary.BigEndian, header.FileSize); err != nil {
-		return fmt.Errorf("failed to write file size: %w", err)
+		return fmt.Errorf("failed to write the file size: %w", err)
 	}
 
 	// Write the file name length as 4 bytes in big-endian format, followed by the file name.
 	fileNameBytes := []byte(header.FileName)
 	fileNameLength := uint32(len(fileNameBytes))
 	if err := binary.Write(w, binary.BigEndian, fileNameLength); err != nil {
-		return fmt.Errorf("failed to write filename length: %w", err)
+		return fmt.Errorf("failed to write the filename length: %w", err)
 	}
 	if _, err := w.Write(fileNameBytes); err != nil {
-		return fmt.Errorf("failed to write filename: %w", err)
+		return fmt.Errorf("failed to write the filename: %w", err)
 	}
 
 	// Write the checksum as fixed-size bytes (32 bytes for SHA-256).
-	if len(header.Checksum) != ChecksumSize {
-		return fmt.Errorf("invalid checksum size: expected %d, got %d", ChecksumSize, len(header.Checksum))
-	}
 	if _, err := w.Write(header.Checksum); err != nil {
-		return fmt.Errorf("failed to write checksum: %w", err)
+		return fmt.Errorf("failed to write the checksum: %w", err)
 	}
 
 	// Write the transfer type as a single byte.
 	if _, err := w.Write([]byte{header.TransferType}); err != nil {
-		return fmt.Errorf("failed to write transfer type: %w", err)
+		return fmt.Errorf("failed to write the transfer type: %w", err)
 	}
 
 	// Write the directory path length as 4 bytes in big-endian format, followed by the directory path.
 	dirPathBytes := []byte(header.DirectoryPath)
 	dirPathLength := uint32(len(dirPathBytes))
 	if err := binary.Write(w, binary.BigEndian, dirPathLength); err != nil {
-		return fmt.Errorf("failed to write directory path length: %w", err)
+		return fmt.Errorf("failed to write the directory path length: %w", err)
 	}
 	if _, err := w.Write(dirPathBytes); err != nil {
-		return fmt.Errorf("failed to write directory path: %w", err)
+		return fmt.Errorf("failed to write the directory path: %w", err)
 	}
 
 	return nil
@@ -164,15 +158,12 @@ func ReadHeader(r io.Reader) (*Header, error) {
 
 	// Read the message type (1 byte).
 	messageTypeBytes := make([]byte, 1)
-	n, err := io.ReadFull(r, messageTypeBytes)
+	_, err := io.ReadFull(r, messageTypeBytes)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, fmt.Errorf("unexpected end of stream while reading the message type: %w", err)
 		}
 		return nil, fmt.Errorf("failed to read the message type: %w", err)
-	}
-	if n != 1 {
-		return nil, fmt.Errorf("incomplete message type read: got %d bytes, expected 1", n)
 	}
 	messageType := messageTypeBytes[0]
 
@@ -182,7 +173,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 		if errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("unexpected end of stream while reading file size: %w", err)
 		}
-		return nil, fmt.Errorf("failed to read file size: %w", err)
+		return nil, fmt.Errorf("failed to read the file size: %w", err)
 	}
 
 	// Read the file name length (4 bytes, big-endian).
@@ -191,10 +182,10 @@ func ReadHeader(r io.Reader) (*Header, error) {
 		if errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("unexpected end of stream while reading filename length: %w", err)
 		}
-		return nil, fmt.Errorf("failed to read filename length: %w", err)
+		return nil, fmt.Errorf("failed to read the filename length: %w", err)
 	}
 
-	// Validate file name length to prevent abuse.
+	// Validate filename length to prevent excessive memory allocation.
 	if fileNameLength > MaxFileNameLength {
 		return nil, fmt.Errorf("%w: filename length %d exceeds the maximum %d",
 			ErrFileNameTooLong, fileNameLength, MaxFileNameLength)
@@ -209,13 +200,13 @@ func ReadHeader(r io.Reader) (*Header, error) {
 				return nil, fmt.Errorf("unexpected end of stream while reading filename: got %d bytes, expected %d: %w",
 					n, fileNameLength, err)
 			}
-			return nil, fmt.Errorf("failed to read filename: %w", err)
-		}
-		if n != int(fileNameLength) {
-			return nil, fmt.Errorf("incomplete filename read: got %d bytes, expected %d", n, fileNameLength)
+			return nil, fmt.Errorf("failed to read the filename: %w", err)
 		}
 	}
 	fileName := string(fileNameBytes)
+
+	// Local variable for number of bytes read.
+	var n int
 
 	// Read the checksum (32 bytes, fixed size).
 	checksumBytes := make([]byte, ChecksumSize)
@@ -225,23 +216,17 @@ func ReadHeader(r io.Reader) (*Header, error) {
 			return nil, fmt.Errorf("unexpected end of stream while reading checksum: got %d bytes, expected %d: %w",
 				n, ChecksumSize, err)
 		}
-		return nil, fmt.Errorf("failed to read checksum: %w", err)
-	}
-	if n != ChecksumSize {
-		return nil, fmt.Errorf("incomplete checksum read: got %d bytes, expected %d", n, ChecksumSize)
+		return nil, fmt.Errorf("failed to read the checksum: %w", err)
 	}
 
 	// Read the transfer type (1 byte).
 	transferTypeBytes := make([]byte, 1)
-	n, err = io.ReadFull(r, transferTypeBytes)
+	_, err = io.ReadFull(r, transferTypeBytes)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, fmt.Errorf("unexpected end of stream while reading transfer type: %w", err)
 		}
-		return nil, fmt.Errorf("failed to read transfer type: %w", err)
-	}
-	if n != 1 {
-		return nil, fmt.Errorf("incomplete transfer type read: got %d bytes, expected 1", n)
+		return nil, fmt.Errorf("failed to read the transfer type: %w", err)
 	}
 	transferType := transferTypeBytes[0]
 
@@ -251,10 +236,10 @@ func ReadHeader(r io.Reader) (*Header, error) {
 		if errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("unexpected end of stream while reading directory path length: %w", err)
 		}
-		return nil, fmt.Errorf("failed to read directory path length: %w", err)
+		return nil, fmt.Errorf("failed to read the directory path length: %w", err)
 	}
 
-	// Validate directory path length to prevent abuse.
+	// Validate directory path length to prevent excessive memory allocation.
 	if dirPathLength > MaxDirPathLength {
 		return nil, fmt.Errorf("%w: directory path length %d exceeds the maximum %d",
 			ErrDirectoryPathTooLong, dirPathLength, MaxDirPathLength)
@@ -269,10 +254,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 				return nil, fmt.Errorf("unexpected end of stream while reading directory path: got %d bytes, expected %d: %w",
 					n, dirPathLength, err)
 			}
-			return nil, fmt.Errorf("failed to read directory path: %w", err)
-		}
-		if n != int(dirPathLength) {
-			return nil, fmt.Errorf("incomplete directory path read: got %d bytes, expected %d", n, dirPathLength)
+			return nil, fmt.Errorf("failed to read the directory path: %w", err)
 		}
 	}
 	dirPath := string(dirPathBytes)

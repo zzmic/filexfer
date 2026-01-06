@@ -59,7 +59,7 @@ func TestSanitizePathEmptyPath(t *testing.T) {
 
 	_, err := sanitizePath(base, userPath)
 	if err == nil {
-		t.Fatalf("expected an error for empty user path")
+		t.Fatalf("expected error for empty user path")
 	}
 }
 
@@ -130,7 +130,7 @@ func TestSanitizePathAbsolutePath(t *testing.T) {
 
 	_, err := sanitizePath(base, userPath)
 	if err == nil {
-		t.Fatal("expected an error for absolute path")
+		t.Fatal("expected error for absolute path")
 	}
 
 }
@@ -143,7 +143,7 @@ func TestSanitizePathUnixStylePathTraversal(t *testing.T) {
 
 	_, err := sanitizePath(base, userPath)
 	if err == nil {
-		t.Fatal("expected an error for unix style path traversal")
+		t.Fatal("expected error for unix style path traversal")
 	}
 }
 
@@ -155,7 +155,7 @@ func TestSanitizePathBackslashPathTraversal(t *testing.T) {
 
 	_, err := sanitizePath(base, userPath)
 	if err == nil {
-		t.Fatal("expected an error for backslash path traversal")
+		t.Fatal("expected error for backslash path traversal")
 	}
 }
 
@@ -167,7 +167,7 @@ func TestSanitizePathMixedPathTraversal(t *testing.T) {
 
 	_, err := sanitizePath(base, userPath)
 	if err == nil {
-		t.Fatal("expected an error for mixed path traversal")
+		t.Fatal("expected error for mixed path traversal")
 	}
 }
 
@@ -176,7 +176,7 @@ func TestSanitizePathMixedPathTraversal(t *testing.T) {
 func TestValidateHeaderNilHeader(t *testing.T) {
 	err := validateHeader(nil, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected an error for the nil header")
+		t.Fatal("expected error for the nil header")
 	}
 }
 
@@ -193,7 +193,7 @@ func TestValidateHeaderFileSizeExceeded(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected an error for the exceeded file size")
+		t.Fatal("expected error for the exceeded file size")
 	}
 }
 
@@ -210,7 +210,7 @@ func TestValidateHeaderEmptyFileName(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected an error for the empty file name")
+		t.Fatal("expected error for the empty file name")
 	}
 }
 
@@ -227,7 +227,7 @@ func TestValidateHeaderSanitizeFailure(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected an error for failing to sanitize the file name")
+		t.Fatal("expected error for failing to sanitize the file name")
 	}
 }
 
@@ -250,7 +250,7 @@ func TestValidateHeaderDirectorySizeValidation(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err == nil {
-		t.Fatal("expected an error for directory size exceeded")
+		t.Fatal("expected error for directory size exceeded")
 	}
 
 	header = &protocol.Header{
@@ -263,7 +263,7 @@ func TestValidateHeaderDirectorySizeValidation(t *testing.T) {
 
 	err = validateHeader(header, "127.0.0.1:12345")
 	if err != nil {
-		t.Fatalf("unexpected an error for valid directory size: %v", err)
+		t.Fatalf("unexpected error for valid directory size: %v", err)
 	}
 }
 
@@ -297,7 +297,7 @@ func TestValidateHeaderDirectorySizeExceededOnTransfer(t *testing.T) {
 
 	err := validateHeader(header, clientAddr)
 	if err == nil {
-		t.Fatal("expected an error for the exceeded directory size on transfer")
+		t.Fatal("expected error for the exceeded directory size on transfer")
 	}
 	if !strings.Contains(err.Error(), "would exceed the maximum allowed size") {
 		t.Fatalf("expected 'would exceed' error, got: %v", err)
@@ -358,7 +358,7 @@ func TestValidateHeaderValidFile(t *testing.T) {
 
 	err := validateHeader(header, "127.0.0.1:12345")
 	if err != nil {
-		t.Fatalf("unexpected an error for valid header: %v", err)
+		t.Fatalf("unexpected error for valid header: %v", err)
 	}
 }
 
@@ -517,7 +517,7 @@ func TestResolveFilePathSkip(t *testing.T) {
 
 	_, err := resolveFilePath(filePath, StrategySkip)
 	if err == nil {
-		t.Fatal("expected an error for the skip strategy on an existing file")
+		t.Fatal("expected error for the skip strategy on an existing file")
 	}
 }
 
@@ -533,7 +533,7 @@ func TestResolveFilePathUnknownStrategy(t *testing.T) {
 
 	_, err := resolveFilePath(filePath, "invalid-strategy")
 	if err == nil {
-		t.Fatal("expected an error for an unknown strategy")
+		t.Fatal("expected error for an unknown strategy")
 	}
 	if !strings.Contains(err.Error(), "unknown file conflict-resolution strategy") {
 		t.Fatalf("expected 'unknown file conflict-resolution strategy' error, got: %v", err)
@@ -776,6 +776,6 @@ func TestReadSetReadDeadlineFailure(t *testing.T) {
 		t.Fatalf("expected 0 bytes read, got %d", n)
 	}
 	if err == nil {
-		t.Fatal("expected an error when SetReadDeadline fails on closed connection")
+		t.Fatal("expected error when SetReadDeadline fails on closed connection")
 	}
 }
