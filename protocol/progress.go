@@ -7,16 +7,6 @@ import (
 	"time"
 )
 
-// toKB converts bytes to kilobytes.
-func toKB(bytes uint64) float64 {
-	return float64(bytes) / 1024
-}
-
-// toMB converts bytes to megabytes.
-func toMB(bytes uint64) float64 {
-	return float64(bytes) / 1024 / 1024
-}
-
 // A ProgressTracker tracks the progress of file transfers.
 type ProgressTracker struct {
 	totalBytes        uint64        // Total number of bytes to transfer.
@@ -37,6 +27,16 @@ type ProgressReader struct {
 type ProgressWriter struct {
 	writer  io.Writer        // Underlying writer.
 	tracker *ProgressTracker // Encapsulated progress tracker.
+}
+
+// toKB converts bytes to kilobytes.
+func toKB(bytes uint64) float64 {
+	return float64(bytes) / 1024
+}
+
+// toMB converts bytes to megabytes.
+func toMB(bytes uint64) float64 {
+	return float64(bytes) / 1024 / 1024
 }
 
 // NewProgressTracker instantiates a new progress tracker.

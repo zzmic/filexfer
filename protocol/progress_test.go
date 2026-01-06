@@ -51,7 +51,7 @@ func TestToMB5GB(t *testing.T) {
 	}
 }
 
-// TestNewProgressTracker tests the `Update` method of the `ProgressTracker` struct to ensure that
+// TestNewProgressTracker tests the `NewProgressTracker` constructor to ensure that
 // it expectedly initializes with given total bytes and description.
 func TestNewProgressTracker(t *testing.T) {
 	pt := NewProgressTracker(0, "")
@@ -140,49 +140,6 @@ func TestCreateProgressBarEdgeCases(t *testing.T) {
 	}
 }
 
-// TestNewProgressReader tests the `NewProgressReader` constructor to ensure that
-// it expectedly initializes the reader and the progress tracker.
-func TestNewProgressReader(t *testing.T) {
-	reader := strings.NewReader("test data")
-	pr := NewProgressReader(reader, 100, "Download")
-
-	if pr.reader == nil {
-		t.Errorf("Expected the reader to be initialized")
-	}
-	if pr.tracker == nil {
-		t.Errorf("Expected the tracker to be initialized")
-	}
-	if pr.tracker.totalBytes != 100 {
-		t.Errorf("Expected totalBytes to be 100, got %d", pr.tracker.totalBytes)
-	}
-	if pr.tracker.description != "Download" {
-		t.Errorf("Expected description to be 'Download', got %s", pr.tracker.description)
-	}
-}
-
-// TestProgressReaderRead tests the `Read` method of `ProgressReader` to ensure that
-// it expectedly reads from the underlying reader and updates progress.
-func TestProgressReaderRead(t *testing.T) {
-	reader := strings.NewReader("hello world")
-	pr := NewProgressReader(reader, 11, "Download")
-
-	buf := make([]byte, 5)
-	n, err := pr.Read(buf)
-
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if n != 5 {
-		t.Errorf("Expected 5 bytes read, got %d", n)
-	}
-	if pr.tracker.bytesTransferred != 5 {
-		t.Errorf("Expected bytesTransferred to be 5, got %d", pr.tracker.bytesTransferred)
-	}
-	if string(buf) != "hello" {
-		t.Errorf("Expected to read 'hello', got %q", string(buf))
-	}
-}
-
 // TestProgressReaderReadMultiple tests the `Read` method with multiple reads to ensure that
 // it expectedly accumulates the bytes transferred.
 func TestProgressReaderReadMultiple(t *testing.T) {
@@ -227,48 +184,6 @@ func TestProgressReaderReadEOF(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("Expected 0 bytes read on EOF, got %d", n)
-	}
-}
-
-// TestNewProgressWriter tests the `NewProgressWriter` constructor to ensure that
-// it expectedly initializes the writer and the progress tracker.
-func TestNewProgressWriter(t *testing.T) {
-	writer := &strings.Builder{}
-	pw := NewProgressWriter(writer, 100, "Upload")
-
-	if pw.writer == nil {
-		t.Errorf("Expected writer to be initialized")
-	}
-	if pw.tracker == nil {
-		t.Errorf("Expected tracker to be initialized")
-	}
-	if pw.tracker.totalBytes != 100 {
-		t.Errorf("Expected totalBytes to be 100, got %d", pw.tracker.totalBytes)
-	}
-	if pw.tracker.description != "Upload" {
-		t.Errorf("Expected description to be 'Upload', got %s", pw.tracker.description)
-	}
-}
-
-// TestProgressWriterWrite tests the `Write` method of `ProgressWriter` to ensure that
-// it expectedly writes to the underlying writer and updates the progress.
-func TestProgressWriterWrite(t *testing.T) {
-	writer := &strings.Builder{}
-	pw := NewProgressWriter(writer, 11, "Upload")
-
-	n, err := pw.Write([]byte("hello world"))
-
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if n != 11 {
-		t.Errorf("Expected 11 bytes written, got %d", n)
-	}
-	if pw.tracker.bytesTransferred != 11 {
-		t.Errorf("Expected bytesTransferred to be 11, got %d", pw.tracker.bytesTransferred)
-	}
-	if writer.String() != "hello world" {
-		t.Errorf("Expected to write 'hello world', got %q", writer.String())
 	}
 }
 

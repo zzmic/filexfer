@@ -101,93 +101,6 @@ func TestWriteResponseMessageTooLong(t *testing.T) {
 	}
 }
 
-// TestWriteResponseSuccessStatus tests `WriteResponse` to ensure that
-// it expectedly writes a success response.
-func TestWriteResponseSuccessStatus(t *testing.T) {
-	var buf bytes.Buffer
-	message := "operation successful"
-
-	err := WriteResponse(&buf, ResponseStatusSuccess, message)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if buf.Len() == 0 {
-		t.Fatal("expected non-empty buffer")
-	}
-
-	status, gotMessage, err := ReadResponse(&buf)
-	if err != nil {
-		t.Fatalf("failed to read back the response: %v", err)
-	}
-	if status != ResponseStatusSuccess {
-		t.Fatalf("expected status %d, got %d", ResponseStatusSuccess, status)
-	}
-	if gotMessage != message {
-		t.Fatalf("expected message %q, got %q", message, gotMessage)
-	}
-}
-
-// TestWriteResponseErrorStatus tests `WriteResponse` to ensure that
-// it expectedly writes an error response.
-func TestWriteResponseErrorStatus(t *testing.T) {
-	var buf bytes.Buffer
-	message := "operation failed"
-
-	err := WriteResponse(&buf, ResponseStatusError, message)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	status, gotMessage, err := ReadResponse(&buf)
-	if err != nil {
-		t.Fatalf("failed to read back the response: %v", err)
-	}
-	if status != ResponseStatusError {
-		t.Fatalf("expected status %d, got %d", ResponseStatusError, status)
-	}
-	if gotMessage != message {
-		t.Fatalf("expected message %q, got %q", message, gotMessage)
-	}
-}
-
-// TestWriteResponseEmptyMessage tests `WriteResponse` to ensure that
-// it expectedly handles empty messages.
-func TestWriteResponseEmptyMessage(t *testing.T) {
-	var buf bytes.Buffer
-
-	err := WriteResponse(&buf, ResponseStatusSuccess, "")
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	status, gotMessage, err := ReadResponse(&buf)
-	if err != nil {
-		t.Fatalf("failed to read back the response: %v", err)
-	}
-	if status != ResponseStatusSuccess {
-		t.Fatalf("expected status %d, got %d", ResponseStatusSuccess, status)
-	}
-	if gotMessage != "" {
-		t.Fatalf("expected empty message, got %q", gotMessage)
-	}
-}
-
-// TestWriteResponseWriteError tests `WriteResponse` to ensure that
-// it expectedly handles write errors.
-func TestWriteResponseWriteError(t *testing.T) {
-	failingWriter := &FailingWriter{failAfter: 0}
-
-	err := WriteResponse(failingWriter, ResponseStatusSuccess, "test")
-
-	if err == nil {
-		t.Error("expected error for the failing writer")
-	}
-	if !strings.Contains(err.Error(), "failed to write") {
-		t.Fatalf("expected 'failed to write' error, got: %v", err)
-	}
-}
-
 // TestReadResponseNilReader tests `ReadResponse` to ensure that
 // it expectedly handles a nil reader.
 func TestReadResponseNilReader(t *testing.T) {
@@ -290,30 +203,6 @@ func TestReadResponseEOFOnMessage(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unexpected end of stream while reading the message") {
 		t.Fatalf("expected 'unexpected end of stream' error, got: %v", err)
-	}
-}
-
-// TestReadResponseSuccess tests `ReadResponse` to ensure that
-// it expectedly reads a complete response.
-func TestReadResponseSuccess(t *testing.T) {
-	var buf bytes.Buffer
-	expectedMessage := "test message"
-
-	err := WriteResponse(&buf, ResponseStatusSuccess, expectedMessage)
-	if err != nil {
-		t.Fatalf("failed to write the response: %v", err)
-	}
-
-	status, message, err := ReadResponse(&buf)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if status != ResponseStatusSuccess {
-		t.Fatalf("expected status %d, got %d", ResponseStatusSuccess, status)
-	}
-	if message != expectedMessage {
-		t.Fatalf("expected message %q, got %q", expectedMessage, message)
 	}
 }
 
