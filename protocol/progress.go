@@ -7,14 +7,14 @@ import (
 	"time"
 )
 
-// toMB converts bytes to megabytes.
-func toMB(bytes uint64) float64 {
-	return float64(bytes) / 1024 / 1024
-}
-
 // toKB converts bytes to kilobytes.
 func toKB(bytes uint64) float64 {
 	return float64(bytes) / 1024
+}
+
+// toMB converts bytes to megabytes.
+func toMB(bytes uint64) float64 {
+	return float64(bytes) / 1024 / 1024
 }
 
 // A ProgressTracker tracks the progress of file transfers.
@@ -68,13 +68,7 @@ func (pt *ProgressTracker) Complete() {
 	pt.displayProgress()
 
 	duration := time.Since(pt.startTime)
-
-	var rate float64
-	if duration.Seconds() > 0 {
-		rate = toMB(pt.totalBytes) / duration.Seconds()
-	} else {
-		rate = 0
-	}
+	rate := pt.calculateRate()
 
 	if pt.totalBytes < 1024 {
 		fmt.Printf("\n%s completed! %d bytes in %v\n",
@@ -100,6 +94,15 @@ func (pt *ProgressTracker) createProgressBar(percentage float64) string {
 	return "[" + bar + "]"
 }
 
+// calculateRate calculates the transfer rate in MB/s.
+func (pt *ProgressTracker) calculateRate() float64 {
+	duration := time.Since(pt.startTime)
+	if duration.Seconds() > 0 {
+		return toMB(pt.bytesTransferred) / duration.Seconds()
+	}
+	return 0
+}
+
 // displayProgress displays the current progress with a progress bar.
 func (pt *ProgressTracker) displayProgress() {
 	if pt.totalBytes == 0 {
@@ -108,14 +111,7 @@ func (pt *ProgressTracker) displayProgress() {
 
 	percentage := float64(pt.bytesTransferred) / float64(pt.totalBytes) * 100
 	progressBar := pt.createProgressBar(percentage)
-	duration := time.Since(pt.startTime)
-
-	var rate float64
-	if duration.Seconds() > 0 {
-		rate = toMB(pt.bytesTransferred) / duration.Seconds()
-	} else {
-		rate = 0
-	}
+	rate := pt.calculateRate()
 
 	var sizeDisplay string
 	if pt.totalBytes < 1024 {

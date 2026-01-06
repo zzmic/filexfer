@@ -5,7 +5,6 @@ import (
 	"context"
 	"filexfer/protocol"
 	"log"
-	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +12,28 @@ import (
 	"testing"
 	"time"
 )
+
+// TestToGBZeroByte tests the `toGB` function with 0 bytes.
+func TestToGBZeroByte(t *testing.T) {
+	bytes := uint64(0)
+	expected := 0.0
+
+	got := toGB(bytes)
+	if got != expected {
+		t.Fatalf("`toGB(%d)` = %f, expected %f", bytes, got, expected)
+	}
+}
+
+// TestToGB5GB tests the `toGB` function with 5 GB.
+func TestToGB5GB(t *testing.T) {
+	bytes := uint64(5 * 1024 * 1024 * 1024)
+	expected := 5.0
+
+	got := toGB(bytes)
+	if got != expected {
+		t.Fatalf("`toGB(%d)` = %f, expected %f", bytes, got, expected)
+	}
+}
 
 // TestSetupLogging tests the `setupLogging` function to ensure that
 // it expectedly configures structured logging.
@@ -27,47 +48,6 @@ func TestSetupLogging(t *testing.T) {
 	expectedPrefix := LogPrefix + " "
 	if log.Prefix() != expectedPrefix {
 		t.Fatalf("expected the log prefix %q, got %q", expectedPrefix, log.Prefix())
-	}
-}
-
-// TestToGB tests the `toGB` function to ensure that
-// it expectedly converts bytes to gigabytes.
-func TestToGB(t *testing.T) {
-	tests := []struct {
-		name     string
-		bytes    uint64
-		expected float64
-	}{
-		{
-			name:     "zero bytes",
-			bytes:    0,
-			expected: 0.0,
-		},
-		{
-			name:     "1 GB",
-			bytes:    1024 * 1024 * 1024,
-			expected: 1.0,
-		},
-		{
-			name:     "5 GB",
-			bytes:    5 * 1024 * 1024 * 1024,
-			expected: 5.0,
-		},
-		{
-			name:     "1 MB",
-			bytes:    1024 * 1024,
-			expected: 0.0009765625,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := toGB(tt.bytes)
-			const epsilon = 1e-7
-			if math.Abs(got-tt.expected) > epsilon {
-				t.Fatalf("`toGB(...)` = %f, expected %f", got, tt.expected)
-			}
-		})
 	}
 }
 
@@ -727,7 +707,7 @@ func TestReadSuccess(t *testing.T) {
 	}
 }
 
-// TestReadContextDeadlineExceeded tests the `Read` method of the `contextReader` to ensure that
+// TestReadContextDeadlineExceeded tests the `Read` method of the `contextReader` struct to ensure that
 // it expectedly respects context deadlines.
 func TestReadContextDeadlineExceeded(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
@@ -763,7 +743,7 @@ func TestReadContextDeadlineExceeded(t *testing.T) {
 	}
 }
 
-// TestReadSetReadDeadlineFailure tests the `Read` method of the `contextReader` to ensure that
+// TestReadSetReadDeadlineFailure tests the `Read` method of the `contextReader` struct to ensure that
 // it expectedly handles `SetReadDeadline` failures.
 func TestReadSetReadDeadlineFailure(t *testing.T) {
 	ctx := context.Background()

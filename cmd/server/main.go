@@ -83,15 +83,15 @@ func (cr *contextReader) Read(p []byte) (n int, err error) {
 	return cr.conn.Read(p)
 }
 
+// toGB converts bytes to gigabytes.
+func toGB(bytes uint64) float64 {
+	return float64(bytes) / 1024 / 1024 / 1024
+}
+
 // setupLogging configures structured logging with timestamps and custom prefix.
 func setupLogging() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 	log.SetPrefix(LogPrefix + " ")
-}
-
-// toGB converts bytes to gigabytes.
-func toGB(bytes uint64) float64 {
-	return float64(bytes) / 1024 / 1024 / 1024
 }
 
 // sanitizePath performs deep sanitization of file paths to prevent path traversal attacks.
