@@ -11,6 +11,16 @@ The utility operates through a client-server architecture:
 4. **Security**: SHA-256 checksums for data integrity verification.
 5. **Progress Tracking**: Real-time transfer progress with rate calculation.
 
+### Validation and Safety (code-level)
+- Client: path validation with size limits (5GB default), empty/missing path checks, non-existent file handling, and explicit error surfacing for server responses.
+- Server: header validation (message type, transfer type, filename length/nulls, checksum size), per-client directory size tracking (50GB default, configurable via `-max-dir-size`), file size cap (5GB), and path sanitization to prevent traversal.
+- Protocol: length-prefixed headers and responses with max lengths (64KB names/paths/messages) to bound allocations and guard against malformed inputs.
+
+### Conflict Resolution (server)
+- Overwrite: remove and replace existing files.
+- Rename: append numeric suffix to avoid conflicts (default).
+- Skip: leave existing files untouched.
+
 ## Supported Transfer Types
 
 ### Single File Transfers
@@ -169,6 +179,19 @@ The binary protocol uses a length-prefixed format for efficient bandwidth usage 
 
 ### Running the Test Suite
 
+#### Unit tests (protocols and core logic)
+
+```bash
+# Run all the unit tests in the codebase.
+make test
+```
+This command executes unit tests for:
+- Protocol components: header encoding/decoding, checksum calculation, progress tracking.
+- Client logic: path validation, file reading/writing, error handling.
+- Server logic: file reception, conflict resolution, error handling.
+
+#### Integration tests (end-to-end)
+
 ```bash
 # Run the basic test script.
 make test-sh
@@ -194,7 +217,6 @@ make test-directory-limit-sh
 The directory size limit test script specifically tests the 50GB directory size limit functionality:
 - **Test 1**: Directory transfer at/below 50GB limit (should succeed)
 - **Test 2**: Directory transfer exceeding 50GB limit (should fail)
-
 This script validates that the `-max-dir-size` parameter properly enforces directory size limits by testing both the "allow" and "reject" behaviors at the boundary.
 
 ### Test Coverage
@@ -204,6 +226,7 @@ This script validates that the `-max-dir-size` parameter properly enforces direc
 - **Error conditions**: Invalid files, network issues.
 - **Performance**: Large file transfer timing.
 - **Size limits**: Directory size limit enforcement (50GB boundary testing).
+- **Client validation**: Path validation (empty/missing/non-existent), symlink handling, size enforcement (5GB default; testable override), context-aware writes, server response parsing.
 
 ## Development and Extensibility
 
