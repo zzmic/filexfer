@@ -211,7 +211,7 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 	startTime := time.Now()
 
 	// Create a progress reader to track the transfer progress.
-	progressReader := protocol.NewProgressReader(file, header.FileSize, "Uploading")
+	progressReader := protocol.NewProgressReader(file, header.FileSize, "Uploading", os.Stderr)
 
 	// Create a context-aware writer that can be interrupted during shutdown.
 	ctxWriter := &contextWriter{

@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -54,7 +55,7 @@ func TestToMB5GB(t *testing.T) {
 // TestNewProgressTracker tests the `NewProgressTracker` constructor to ensure that
 // it expectedly initializes with given total bytes and description.
 func TestNewProgressTracker(t *testing.T) {
-	pt := NewProgressTracker(0, "")
+	pt := NewProgressTracker(0, "", os.Stderr)
 	if pt.totalBytes != 0 {
 		t.Errorf("Expected totalBytes to be 0, got %d", pt.totalBytes)
 	}
@@ -63,10 +64,24 @@ func TestNewProgressTracker(t *testing.T) {
 	}
 }
 
+// TestNewProgressTrackerWithNilWriter tests that `NewProgressTracker` defaults to `os.Stderr` when writer is nil.
+func TestNewProgressTrackerWithNilWriter(t *testing.T) {
+	pt := NewProgressTracker(1000, "Test", nil)
+	if pt.writer != os.Stderr {
+		t.Errorf("Expected writer to be os.Stderr when nil is passed, got %v", pt.writer)
+	}
+	if pt.totalBytes != 1000 {
+		t.Errorf("Expected totalBytes to be 1000, got %d", pt.totalBytes)
+	}
+	if pt.description != "Test" {
+		t.Errorf("Expected description to be 'Test', got %s", pt.description)
+	}
+}
+
 // TestProgressTrackerUpdate tests the `Update` method of the `ProgressTracker` struct to ensure that
 // it expectedly updates the bytes transferred.
 func TestProgressTrackerUpdate(t *testing.T) {
-	pt := NewProgressTracker(1000, "Test Transfer")
+	pt := NewProgressTracker(1000, "Test Transfer", os.Stderr)
 	pt.Update(500)
 	if pt.bytesTransferred != 500 {
 		t.Errorf("Expected bytesTransferred to be 500, got %d", pt.bytesTransferred)
@@ -76,7 +91,7 @@ func TestProgressTrackerUpdate(t *testing.T) {
 // TestProgressTrackerUpdateMultiple tests the `Update` method with multiple calls to ensure that
 // it expectedly accumulates the bytes transferred.
 func TestProgressTrackerUpdateMultiple(t *testing.T) {
-	pt := NewProgressTracker(1000, "Test Transfer")
+	pt := NewProgressTracker(1000, "Test Transfer", os.Stderr)
 	pt.Update(100)
 	pt.Update(300)
 	pt.Update(800)
@@ -85,15 +100,37 @@ func TestProgressTrackerUpdateMultiple(t *testing.T) {
 	}
 }
 
-// TestProgressTrackerComplete tests the `Complete` method to ensure that
-// it expectedly sets `bytesTransferred` to the total bytes when marked complete.
-func TestProgressTrackerComplete(t *testing.T) {
-	pt := NewProgressTracker(1000, "Test Transfer")
-	pt.Update(500)
-	// Intentionally complete the transfer even though not all bytes transferred.
-	pt.Complete()
-	if pt.bytesTransferred != 1000 {
-		t.Errorf("Expected bytesTransferred to be 1000 after Complete(), got %d", pt.bytesTransferred)
+// errorWriter is a writer that always returns an error for testing error handling.
+type errorWriter struct{}
+
+// Write implements the `io.Writer` interface and returns an error for testing error handling.
+func (ew *errorWriter) Write(p []byte) (n int, err error) {
+	return 0, io.ErrClosedPipe
+}
+
+// TestProgressTrackerCompleteWithErrorWriter tests the `Complete` method to ensure that
+// it expectedly handles errors gracefully when the writer returns an error.
+func TestProgressTrackerCompleteWithErrorWriter(t *testing.T) {
+	errorWriter := &errorWriter{}
+
+	tests := []struct {
+		name       string
+		totalBytes uint64
+	}{
+		{"small file (< 1KB)", 512},
+		{"medium file (1KB-1MB)", 512 * 1024},
+		{"large file (>= 1MB)", 2 * 1024 * 1024},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pt := NewProgressTracker(tt.totalBytes, tt.name, errorWriter)
+			pt.Update(tt.totalBytes / 2)
+			pt.Complete()
+			if pt.bytesTransferred != tt.totalBytes {
+				t.Errorf("Expected bytesTransferred to be %d, got %d", tt.totalBytes, pt.bytesTransferred)
+			}
+		})
 	}
 }
 
@@ -114,7 +151,7 @@ func TestCreateProgressBar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pt := NewProgressTracker(1000, "Test")
+			pt := NewProgressTracker(1000, "Test", os.Stderr)
 			got := pt.createProgressBar(tt.percentage)
 			if got != tt.expected {
 				t.Errorf("createProgressBar(%.1f) = %q; expected %q", tt.percentage, got, tt.expected)
@@ -125,7 +162,7 @@ func TestCreateProgressBar(t *testing.T) {
 
 // TestCreateProgressBarEdgeCases tests the `createProgressBar` method with edge-case percentages.
 func TestCreateProgressBarEdgeCases(t *testing.T) {
-	pt := NewProgressTracker(1000, "Test")
+	pt := NewProgressTracker(1000, "Test", os.Stderr)
 
 	// Test a very low percentage just above 0%.
 	bar := pt.createProgressBar(0.1)
@@ -144,7 +181,7 @@ func TestCreateProgressBarEdgeCases(t *testing.T) {
 // it expectedly accumulates the bytes transferred.
 func TestProgressReaderReadMultiple(t *testing.T) {
 	reader := strings.NewReader("hello world test")
-	pr := NewProgressReader(reader, 16, "Download")
+	pr := NewProgressReader(reader, 16, "Download", os.Stderr)
 
 	buf := make([]byte, 5)
 	n1, _ := pr.Read(buf)
@@ -161,7 +198,7 @@ func TestProgressReaderReadMultiple(t *testing.T) {
 // it expectedly returns `io.EOF` when the underlying reader is saturated.
 func TestProgressReaderReadEOF(t *testing.T) {
 	reader := strings.NewReader("test")
-	pr := NewProgressReader(reader, 4, "Download")
+	pr := NewProgressReader(reader, 4, "Download", os.Stderr)
 
 	buf := make([]byte, 10)
 	n, err := pr.Read(buf)
@@ -191,7 +228,7 @@ func TestProgressReaderReadEOF(t *testing.T) {
 // it expectedly accumulates the bytes transferred.
 func TestProgressWriterWriteMultiple(t *testing.T) {
 	writer := &strings.Builder{}
-	pw := NewProgressWriter(writer, 15, "Upload")
+	pw := NewProgressWriter(writer, 15, "Upload", os.Stderr)
 
 	if _, err := pw.Write([]byte("hello")); err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -215,7 +252,7 @@ func TestProgressWriterWriteMultiple(t *testing.T) {
 // it expectedly handles zero-length writes.
 func TestProgressWriterWriteEmpty(t *testing.T) {
 	writer := &strings.Builder{}
-	pw := NewProgressWriter(writer, 10, "Upload")
+	pw := NewProgressWriter(writer, 10, "Upload", os.Stderr)
 
 	n, err := pw.Write([]byte{})
 
@@ -234,7 +271,7 @@ func TestProgressWriterWriteEmpty(t *testing.T) {
 // it expectedly sets `bytesTransferred` to the total bytes when marked complete.
 func TestProgressReaderComplete(t *testing.T) {
 	reader := strings.NewReader("hello")
-	pr := NewProgressReader(reader, 5, "Download")
+	pr := NewProgressReader(reader, 5, "Download", os.Stderr)
 
 	pr.tracker.Update(3)
 	pr.Complete()
@@ -261,7 +298,7 @@ func TestProgressTrackerCompleteVariousSizes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pt := NewProgressTracker(tt.bytes, tt.name)
+			pt := NewProgressTracker(tt.bytes, tt.name, os.Stderr)
 			pt.Update(tt.bytes)
 			pt.Complete()
 
@@ -275,7 +312,7 @@ func TestProgressTrackerCompleteVariousSizes(t *testing.T) {
 // TestProgressTrackerUpdateWithTimeDilation tests the `Update` method of `ProgressTracker` to ensure that
 // it expectedly calls `displayProgress` when enough time has passed since the last update.
 func TestProgressTrackerUpdateWithTimeDilation(t *testing.T) {
-	pt := NewProgressTracker(1000, "Delayed Transfer")
+	pt := NewProgressTracker(1000, "Delayed Transfer", os.Stderr)
 
 	// The first update should not trigger `displayProgress` since less than `barUpdateInterval` has passed.
 	pt.Update(100)
@@ -294,7 +331,7 @@ func TestProgressTrackerUpdateWithTimeDilation(t *testing.T) {
 // TestProgressTrackerZeroTotalBytes tests the `displayProgress` method of `ProgressTracker` when totalBytes is zero to ensure that
 // it expectedly handles the edge case without errors.
 func TestProgressTrackerZeroTotalBytes(t *testing.T) {
-	pt := NewProgressTracker(0, "Zero Transfer")
+	pt := NewProgressTracker(0, "Zero Transfer", os.Stderr)
 	pt.displayProgress()
 	// No panic or error should occur.
 }
@@ -316,7 +353,7 @@ func TestProgressTrackerDisplayProgressVariousSizes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pt := NewProgressTracker(tt.totalBytes, tt.name)
+			pt := NewProgressTracker(tt.totalBytes, tt.name, os.Stderr)
 			pt.Update(tt.bytesProgress)
 			pt.lastUpdate = time.Now().Add(-500 * time.Millisecond)
 			pt.displayProgress()
@@ -331,7 +368,7 @@ func TestProgressTrackerDisplayProgressVariousSizes(t *testing.T) {
 // TestProgressTrackerUpdateNoDisplayBecauseOfTime tests the `Update` method of `ProgressTracker` to ensure that
 // it expectedly does not call `displayProgress` when not enough time has passed since the last update.
 func TestProgressTrackerUpdateNoDisplayBecauseOfTime(t *testing.T) {
-	pt := NewProgressTracker(1000, "No Display Transfer")
+	pt := NewProgressTracker(1000, "No Display Transfer", os.Stderr)
 	pt.Update(100)
 
 	// Intentionally update again immediately, which should not trigger `displayProgress` since less than `barUpdateInterval` has passed.
@@ -345,7 +382,7 @@ func TestProgressTrackerUpdateNoDisplayBecauseOfTime(t *testing.T) {
 // TestProgressTrackerCompleteZeroRate tests the `Complete` method of `ProgressTracker` when transfer time is very short ($rate \approx 0$) to ensure that
 // it expectedly handles the zero-rate scenario.
 func TestProgressTrackerCompleteZeroRate(t *testing.T) {
-	pt := NewProgressTracker(100, "Instant Transfer")
+	pt := NewProgressTracker(100, "Instant Transfer", os.Stderr)
 	// Intentionally complete the transfer immediately.
 	pt.Complete()
 
@@ -358,7 +395,7 @@ func TestProgressTrackerCompleteZeroRate(t *testing.T) {
 // it expectedly handles the zero-byte read scenario.
 func TestProgressReaderReadWithZeroBytes(t *testing.T) {
 	reader := strings.NewReader("")
-	pr := NewProgressReader(reader, 0, "Empty Download")
+	pr := NewProgressReader(reader, 0, "Empty Download", os.Stderr)
 
 	buf := make([]byte, 10)
 	n, _ := pr.Read(buf)
@@ -386,7 +423,7 @@ func TestProgressTrackerCalculateRateVariations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pt := NewProgressTracker(tt.bytes, tt.name)
+			pt := NewProgressTracker(tt.bytes, tt.name, os.Stderr)
 			pt.bytesTransferred = tt.bytes
 			pt.startTime = time.Now().Add(-tt.timePassed)
 
@@ -405,7 +442,7 @@ func TestProgressTrackerCalculateRateVariations(t *testing.T) {
 // TestProgressTrackerCalculateRateExactlyZero tests the `calculateRate` method of `ProgressTracker` when duration is exactly zero to ensure that
 // it expectedly returns a rate of zero.
 func TestProgressTrackerCalculateRateExactlyZero(t *testing.T) {
-	pt := NewProgressTracker(1000, "Exactly Zero")
+	pt := NewProgressTracker(1000, "Exactly Zero", os.Stderr)
 	pt.bytesTransferred = 500
 	// Set `startTime` to `now + 1` second to simulate zero or negative duration.
 	futureTime := time.Now().Add(time.Second)
@@ -423,7 +460,7 @@ func TestProgressTrackerCalculateRateExactlyZero(t *testing.T) {
 // it expectedly sets `bytesTransferred` to the total bytes when marked complete.
 func TestProgressWriterComplete(t *testing.T) {
 	writer := &strings.Builder{}
-	pw := NewProgressWriter(writer, 5, "Upload")
+	pw := NewProgressWriter(writer, 5, "Upload", os.Stderr)
 
 	pw.tracker.Update(3)
 	pw.Complete()

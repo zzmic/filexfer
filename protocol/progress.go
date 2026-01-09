@@ -3,6 +3,8 @@ package protocol
 import (
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"strings"
 	"time"
 )
@@ -15,6 +17,7 @@ type ProgressTracker struct {
 	lastUpdate        time.Time     // Time of the last progress update.
 	barUpdateInterval time.Duration // Interval between progress bar updates.
 	description       string        // Description of the transfer.
+	writer            io.Writer     // Writer for progress output (defaults to os.Stderr).
 }
 
 // A ProgressReader tracks the progress of reading from an `io.Reader`.
@@ -40,7 +43,11 @@ func toMB(bytes uint64) float64 {
 }
 
 // NewProgressTracker instantiates a new progress tracker.
-func NewProgressTracker(totalBytes uint64, description string) *ProgressTracker {
+// If writer is nil, it defaults to os.Stderr to keep os.Stdout clean for piping.
+func NewProgressTracker(totalBytes uint64, description string, writer io.Writer) *ProgressTracker {
+	if writer == nil {
+		writer = os.Stderr
+	}
 	return &ProgressTracker{
 		totalBytes:        totalBytes,
 		bytesTransferred:  0,
@@ -48,6 +55,7 @@ func NewProgressTracker(totalBytes uint64, description string) *ProgressTracker 
 		lastUpdate:        time.Now(),
 		barUpdateInterval: 250 * time.Millisecond, // Update every 250ms.
 		description:       description,
+		writer:            writer,
 	}
 }
 
@@ -71,15 +79,21 @@ func (pt *ProgressTracker) Complete() {
 	rate := pt.calculateRate()
 
 	if pt.totalBytes < 1024 {
-		fmt.Printf("\n%s completed! %d bytes in %v\n",
-			pt.description, pt.totalBytes, duration)
+		if _, err := fmt.Fprintf(pt.writer, "\n%s completed! %d bytes in %v\n",
+			pt.description, pt.totalBytes, duration); err != nil {
+			log.Printf("Failed to write the transfer completion message: %v", err)
+		}
 	} else if pt.totalBytes < 1024*1024 {
-		fmt.Printf("\n%s completed! %.1f KB in %v (%.2f MB/s)\n",
-			pt.description, toKB(pt.totalBytes), duration, rate)
+		if _, err := fmt.Fprintf(pt.writer, "\n%s completed! %.1f KB in %v (%.2f MB/s)\n",
+			pt.description, toKB(pt.totalBytes), duration, rate); err != nil {
+			log.Printf("Failed to write the transfer completion message: %v", err)
+		}
 
 	} else {
-		fmt.Printf("\n%s completed! %.1f MB in %v (%.2f MB/s)\n",
-			pt.description, toMB(pt.totalBytes), duration, rate)
+		if _, err := fmt.Fprintf(pt.writer, "\n%s completed! %.1f MB in %v (%.2f MB/s)\n",
+			pt.description, toMB(pt.totalBytes), duration, rate); err != nil {
+			log.Printf("Failed to write the transfer completion message: %v", err)
+		}
 	}
 }
 
@@ -124,15 +138,16 @@ func (pt *ProgressTracker) displayProgress() {
 			toMB(pt.bytesTransferred), toMB(pt.totalBytes))
 	}
 
-	fmt.Printf("\r%s %s %.1f%% (%s, %.2f MB/s)",
+	_, _ = fmt.Fprintf(pt.writer, "\r%s %s %.1f%% (%s, %.2f MB/s)",
 		pt.description, progressBar, percentage, sizeDisplay, rate)
 }
 
 // NewProgressReader creates a new progress reader.
-func NewProgressReader(reader io.Reader, totalBytes uint64, description string) *ProgressReader {
+// If writer is nil, progress output defaults to os.Stderr to keep os.Stdout clean for piping.
+func NewProgressReader(reader io.Reader, totalBytes uint64, description string, writer io.Writer) *ProgressReader {
 	return &ProgressReader{
 		reader:  reader,
-		tracker: NewProgressTracker(totalBytes, description),
+		tracker: NewProgressTracker(totalBytes, description, writer),
 	}
 }
 
@@ -151,10 +166,11 @@ func (pr *ProgressReader) Complete() {
 }
 
 // NewProgressWriter creates a new progress writer.
-func NewProgressWriter(writer io.Writer, totalBytes uint64, description string) *ProgressWriter {
+// If progressWriter is nil, progress output defaults to os.Stderr to keep os.Stdout clean for piping.
+func NewProgressWriter(writer io.Writer, totalBytes uint64, description string, progressWriter io.Writer) *ProgressWriter {
 	return &ProgressWriter{
 		writer:  writer,
-		tracker: NewProgressTracker(totalBytes, description),
+		tracker: NewProgressTracker(totalBytes, description, progressWriter),
 	}
 }
 
