@@ -38,12 +38,13 @@ const (
 
 // Constants for server configuration.
 const (
-	MaxFileSize      = 5 * 1024 * 1024 * 1024  // 5GB limit.
-	MaxDirectorySize = 50 * 1024 * 1024 * 1024 // 50GB limit for directory transfers.
-	LogPrefix        = "[SERVER]"              // Log prefix.
-	ReadTimeout      = 30 * time.Second        // Read timeout.
-	WriteTimeout     = 30 * time.Second        // Write timeout.
-	ShutdownTimeout  = 30 * time.Second        // Shutdown timeout.
+	MaxFileSize        = 5 * 1024 * 1024 * 1024  // 5GB limit.
+	MaxDirectorySize   = 50 * 1024 * 1024 * 1024 // 50GB limit for directory transfers.
+	LogPrefix          = "[SERVER]"              // Log prefix.
+	ReadTimeout        = 30 * time.Second        // Read timeout.
+	WriteTimeout       = 30 * time.Second        // Write timeout.
+	ShutdownTimeout    = 30 * time.Second        // Shutdown timeout.
+	TransferBufferSize = 1024 * 1024             // 1MB buffer for `io.CopyBuffer` to improve throughput.
 )
 
 // Command-line flags for server configuration.
@@ -409,7 +410,8 @@ func handleConnection(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 		// Instantiate a `ProgressWriter` to track transfer progress.
 		progressWriter := protocol.NewProgressWriter(outputFile, header.FileSize, fmt.Sprintf("Receiving %s", header.FileName), os.Stderr)
 
-		bytesWritten, err := io.Copy(progressWriter, teeReader)
+		transferBuffer := make([]byte, TransferBufferSize)
+		bytesWritten, err := io.CopyBuffer(progressWriter, teeReader, transferBuffer)
 		if err != nil {
 			log.Printf("Failed to receive file content from %s: %v", clientAddr, err)
 			if errors.Is(err, io.EOF) {

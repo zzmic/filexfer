@@ -2,7 +2,7 @@
 
 ## Overview
 
-`filexfer` is a multi-threaded file transfer application written in Go that supports both single-file and directory transfers over TCP connections. The application implements a custom binary protocol with features such as TLS encryption, SHA-256 checksums, progress tracking, configurable conflict-resolution strategies, and persistent connections for efficient directory transfers.
+`filexfer` is a multi-threaded file transfer application written in Go that supports both single-file and directory transfers over TCP/TLS connections. The application implements a custom binary protocol with features such as TLS encryption, SHA-256 checksums, progress tracking, configurable conflict-resolution strategies, and persistent connections for efficient directory transfers.
 
 The utility operates through a client-server architecture:
 
@@ -239,6 +239,7 @@ The binary protocol uses a length-prefixed format for efficient bandwidth usage 
 ### Performance and Scalability
 
 - **Memory-efficient streaming**: Files are streamed directly to disk without loading entire files into RAM, enabling efficient handling of large files (up to 5GB) and multiple concurrent transfers.
+- **Optimized buffer size**: Uses 1MB buffers for `io.CopyBuffer` operations (v.s. 32KB by default), reducing system calls by ~97% and effectively improving throughput on high-bandwidth networks (where the total number of system calls = 2 * ceil(`header.FileSize`/`TransferBufferSize`)).
 - **On-the-fly checksum calculation**: SHA-256 checksums are calculated during transfer using `io.TeeReader`, eliminating the need for double-pass file reading.
 - **Persistent connections**: Directory transfers reuse a single TCP connection for all files, eliminating connection setup overhead and reducing latency for large directory transfers (e.g., 10,000 files = 1 connection instead of 10,000).
 - **Concurrent transfers**: Server handles multiple client connections simultaneously using goroutines, with per-client resource tracking.

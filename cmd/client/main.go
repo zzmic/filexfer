@@ -34,11 +34,12 @@ var MaxFileSize int64 = 5 * 1024 * 1024 * 1024
 
 // Other constants for client configuration.
 const (
-	LogPrefix         = "[CLIENT]"       // Log prefix for client logs.
-	ConnectionTimeout = 30 * time.Second // Connection timeout duration.
-	ReadTimeout       = 30 * time.Second // Read timeout duration.
-	WriteTimeout      = 30 * time.Second // Write timeout duration.
-	ShutdownTimeout   = 30 * time.Second // Shutdown timeout duration.
+	LogPrefix          = "[CLIENT]"       // Log prefix for client logs.
+	ConnectionTimeout  = 30 * time.Second // Connection timeout duration.
+	ReadTimeout        = 30 * time.Second // Read timeout duration.
+	WriteTimeout       = 30 * time.Second // Write timeout duration.
+	ShutdownTimeout    = 30 * time.Second // Shutdown timeout duration.
+	TransferBufferSize = 1024 * 1024      // 1MB buffer for `io.CopyBuffer` to improve throughput.
 )
 
 // Command-line flags for the client.
@@ -233,7 +234,8 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 	// Start the file transfer in a separate goroutine.
 	go func() {
 		defer transferWg.Done()
-		bytesWritten, transferErr = io.Copy(ctxWriter, progressReader)
+		transferBuffer := make([]byte, TransferBufferSize)
+		bytesWritten, transferErr = io.CopyBuffer(ctxWriter, progressReader, transferBuffer)
 	}()
 
 	// Wait for the transfer to complete or for a shutdown signal.

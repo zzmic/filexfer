@@ -14,7 +14,9 @@ func CalculateFileChecksum(file io.Reader) ([]byte, error) {
 
 	hash := sha256.New()
 
-	_, err := io.Copy(hash, file)
+	// Use a 1MB buffer for better performance on large files.
+	buffer := make([]byte, 1024*1024)
+	_, err := io.CopyBuffer(hash, file, buffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file for checksum calculation: %w", err)
 	}

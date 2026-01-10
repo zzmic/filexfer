@@ -25,7 +25,8 @@ YELLOW = \033[33m
 CYAN = \033[36m
 
 .PHONY: all build client server clean fmt vet clean deps tidy lint install uninstall \
-	run-client run-server test test-verbose cover test-sh test-large-directory-sh test-directory-limit-sh help
+	run-client run-server test test-verbose cover-func cover-html \
+	test-sh test-large-directory-sh test-directory-limit-sh help
 
 all: fmt vet build
 
@@ -93,7 +94,11 @@ test:
 test-verbose:
 	$(GOCMD) test -v ./...
 
-cover:
+cover-func:
+	$(GOCMD) test -coverprofile=coverage.out ./...
+	$(GOCMD) tool cover -func=coverage.out
+
+cover-html:
 	$(GOCMD) test -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out
 
@@ -117,7 +122,7 @@ help:
 	@printf '  %-30s %s\n' 'ARGS' 'Arguments for run-client/run-server (e.g. ARGS="-port 9090")'
 	@echo
 	@echo 'Targets:'
-	@printf '  %-30s %s\n' 'all' 'Format, vet, and build both client and server.'
+	@printf '  %-30s %s\n' 'all' 'Format, vet, and build both a client and a server.'
 	@printf '  %-30s %s\n' 'build' 'Build both client and server binaries.'
 	@printf '  %-30s %s\n' 'client' 'Build the client binary.'
 	@printf '  %-30s %s\n' 'server' 'Build the server binary.'
@@ -133,8 +138,9 @@ help:
 	@printf '  %-30s %s\n' 'run-server' 'Run the server binary with optional ARGS.'
 	@printf '  %-30s %s\n' 'test' 'Run unit tests.'
 	@printf '  %-30s %s\n' 'test-verbose' 'Run unit tests with verbose output.'
-	@printf '  %-30s %s\n' 'cover' 'Run unit tests and generate coverage report.'
-	@printf '  %-30s %s\n' 'test-sh' 'Run test.sh script.'
-	@printf '  %-30s %s\n' 'test-large-directory-sh' 'Run test_large_directory.sh script.'
-	@printf '  %-30s %s\n' 'test-directory-limit-sh' 'Run test_directory_limit.sh script.'
+	@printf '  %-30s %s\n' 'cover-func' 'Run unit tests and generate a function coverage report.'
+	@printf '  %-30s %s\n' 'cover-html' 'Run unit tests and generate a HTML coverage report.'
+	@printf '  %-30s %s\n' 'test-sh' 'Run the test.sh script.'
+	@printf '  %-30s %s\n' 'test-large-directory-sh' 'Run the test_large_directory.sh script.'
+	@printf '  %-30s %s\n' 'test-directory-limit-sh' 'Run the test_directory_limit.sh script.'
 	@printf '  %-30s %s\n' 'help' 'Show this help message.'
