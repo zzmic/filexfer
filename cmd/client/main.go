@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"filexfer/protocol"
 	"flag"
@@ -41,8 +43,10 @@ const (
 
 // Command-line flags for the client.
 var (
-	serverAddr = flag.String("server", "localhost:8080", "Server address (IP:Port)")
-	filePath   = flag.String("file", "", "File or directory to be transferred (required)")
+	serverAddr    = flag.String("server", "localhost:8080", "Server address (IP:Port)")
+	filePath      = flag.String("file", "", "File or directory to be transferred (required)")
+	tlsSkipVerify = flag.Bool("tls-skip-verify", false, "Skip TLS certificate verification (insecure, for testing only)")
+	tlsCAFile     = flag.String("tls-ca", "", "Path to CA certificate file for TLS verification")
 )
 
 // toKB converts bytes to kilobytes.
@@ -294,7 +298,7 @@ func transferFile(ctx context.Context, conn net.Conn, filePath string, relPath .
 // validateDirectorySize validates the total size of the directory with the server before starting the transfer.
 func validateDirectorySize(totalSize int64) error {
 	// Create a connection to validate directory size.
-	conn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
+	conn, err := dialWithTLS("tcp", *serverAddr, ConnectionTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to connect for directory size validation: %v", err)
 	}
@@ -364,7 +368,7 @@ func transferDirectory(ctx context.Context, dirPath string) error {
 	var totalBytesTransferred int64
 
 	log.Printf("Establishing a persistent connection for the directory transfer...")
-	fileConn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
+	fileConn, err := dialWithTLS("tcp", *serverAddr, ConnectionTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to establish the connection for the directory transfer: %v", err)
 	}
@@ -498,7 +502,7 @@ func main() {
 	log.Printf("Connecting to the server at %s...", *serverAddr)
 
 	// Establish a TCP connection to the server using the server's address.
-	conn, err := net.DialTimeout("tcp", *serverAddr, ConnectionTimeout)
+	conn, err := dialWithTLS("tcp", *serverAddr, ConnectionTimeout)
 	if err != nil {
 		log.Fatalf("Failed to establish TCP connection to the server: %v", err)
 	}
@@ -527,4 +531,53 @@ func main() {
 	}
 
 	log.Printf("Client shutting down.")
+}
+
+// loadTLSConfig loads the TLS configuration for the client based on command-line flags.
+func loadTLSConfig() (*tls.Config, error) {
+	// When no TLS flags are provided, return nil to indicate plain TCP.
+	if !*tlsSkipVerify && *tlsCAFile == "" {
+		return nil, nil
+	}
+
+	config := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	if *tlsSkipVerify {
+		config.InsecureSkipVerify = true
+		log.Printf("WARNING: TLS certificate verification is disabled (insecure)")
+		return config, nil
+	}
+
+	caCert, err := os.ReadFile(*tlsCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the CA certificate: %v", err)
+	}
+
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(caCert) {
+		return nil, fmt.Errorf("failed to parse the CA certificate")
+	}
+
+	config.RootCAs = caCertPool
+	return config, nil
+}
+
+// dialWithTLS establishes a connection with optional TLS encryption (fallback to plain TCP if no TLS config is provided).
+func dialWithTLS(network, address string, timeout time.Duration) (net.Conn, error) {
+	tlsConfig, err := loadTLSConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load the TLS configuration: %v", err)
+	}
+
+	dialer := &net.Dialer{
+		Timeout: timeout,
+	}
+
+	if tlsConfig != nil {
+		return tls.DialWithDialer(dialer, network, address, tlsConfig)
+	}
+
+	return dialer.Dial(network, address)
 }

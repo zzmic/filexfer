@@ -48,21 +48,16 @@ $(SERVER_BINARY): $(SERVER_SOURCE)/*.go protocol/*.go
 	@echo "$(GREEN)Server binary built at $(SERVER_BINARY)$(RESET)"
 
 fmt:
-	@echo "$(YELLOW)Formatting code...$(RESET)"
 	$(GOFMT) ./...
 
 vet:
-	@echo "$(YELLOW)Vetting code...$(RESET)"
 	$(GOVET) ./...
 
 clean:
-	@echo "$(YELLOW)Cleaning build artifacts...$(RESET)"
 	$(GOCLEAN)
 	rm -r $(BINARY_DIR)/*
-	@echo "$(GREEN)Clean complete.$(RESET)"
 
 deps:
-	@echo "$(CYAN)Downloading dependencies...$(RESET)"
 	$(GOMOD) tidy
 	$(GOMOD) download
 

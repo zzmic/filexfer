@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"errors"
 	"filexfer/protocol"
 	"flag"
@@ -51,6 +52,8 @@ var (
 	destDir          = flag.String("dir", "test", "Destination directory for received files")
 	fileStrategy     = flag.String("strategy", "rename", "File conflict-resolution strategy: overwrite, rename, or skip")
 	maxDirectorySize = flag.Uint64("max-dir-size", MaxDirectorySize, "Maximum directory transfer size in bytes")
+	tlsCertFile      = flag.String("tls-cert", "", "Path to TLS certificate file (required for TLS)")
+	tlsKeyFile       = flag.String("tls-key", "", "Path to TLS private key file (required for TLS)")
 )
 
 // Global variables for tracking directory sizes per client.
@@ -503,15 +506,31 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Establish a listener on the specified port and listen for incoming connections.
-	listener, err := net.Listen("tcp", ":"+*listenPort)
+	// Load the TLS configuration if certificates are provided.
+	tlsConfig, err := loadTLSConfig()
 	if err != nil {
-		log.Fatalf("Failed to start listening for incoming connections: %v", err)
+		log.Fatalf("Failed to load TLS configuration: %v", err)
+	}
+
+	// Establish a listener on the specified port and listen for incoming connections.
+	var listener net.Listener
+	if tlsConfig != nil {
+		log.Printf("Starting server with TLS encryption")
+		listener, err = tls.Listen("tcp", ":"+*listenPort, tlsConfig)
+		if err != nil {
+			log.Fatalf("Failed to start listening for incoming TLS connections: %v", err)
+		}
+	} else {
+		log.Printf("WARNING: Starting server without TLS encryption (insecure)")
+		listener, err = net.Listen("tcp", ":"+*listenPort)
+		if err != nil {
+			log.Fatalf("Failed to start listening for incoming connections: %v", err)
+		}
 	}
 
 	defer func() {
 		if err := listener.Close(); err != nil {
-			log.Printf("Error closing listener: %v", err)
+			log.Printf("Error closing the listener: %v", err)
 		}
 		log.Printf("Server listener closed")
 	}()
@@ -603,4 +622,21 @@ func main() {
 		// Launch a new goroutine to handle the client connection so that the server can concurrently handle multiple connections.
 		go handleConnection(ctx, conn, &wg)
 	}
+}
+
+// loadTLSConfig loads the TLS configuration for the server.
+func loadTLSConfig() (*tls.Config, error) {
+	if *tlsCertFile == "" || *tlsKeyFile == "" {
+		return nil, nil
+	}
+
+	cert, err := tls.LoadX509KeyPair(*tlsCertFile, *tlsKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load the TLS certificate: %v", err)
+	}
+
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}, nil
 }

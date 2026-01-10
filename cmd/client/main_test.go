@@ -3,10 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"filexfer/protocol"
 	"io"
 	"log"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -781,7 +787,7 @@ func TestReadServerResponseWithMessage(t *testing.T) {
 	}
 }
 
-// TestValidatePathWithDotDotDirectory tests `validatePath` with a path containing .. directory traversal.
+// TestValidatePathWithDotDotDirectory tests `validatePath` with a path containing `..` directory traversal.
 func TestValidatePathWithDotDotDirectory(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "testdir-*")
 	if err != nil {
@@ -846,5 +852,310 @@ func TestContextWriterLargeData(t *testing.T) {
 	}
 	if n != len(testData) {
 		t.Fatalf("expected %d bytes written for the large data, got %d", len(testData), n)
+	}
+}
+
+// generateTestCACert generates a self-signed CA certificate for testing.
+func generateTestCACert(t *testing.T) (caFile string) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	caFile = filepath.Join(tmpDir, "ca.crt")
+
+	// Generates a 2048-bit RSA key.
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate the private key: %v", err)
+	}
+
+	// Create a CA certificate template.
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"Test CA"},
+			CommonName:   "Test CA",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	// Create a self-signed CA certificate valid for 365 days.
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("failed to create the certificate: %v", err)
+	}
+
+	certOut, err := os.Create(caFile)
+	if err != nil {
+		t.Fatalf("failed to create the cert file: %v", err)
+	}
+	defer func() {
+		if err := certOut.Close(); err != nil {
+			t.Fatalf("failed to close the cert file: %v", err)
+		}
+	}()
+
+	// Encode and write the certificate to a PEM file.
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		t.Fatalf("failed to write the certificate: %v", err)
+	}
+
+	return caFile
+}
+
+// TestLoadTLSConfigDefault tests that `loadTLSConfig` returns a default config when no flags are set.
+func TestLoadTLSConfigDefault(t *testing.T) {
+	oldSkipVerify := *tlsSkipVerify
+	oldCAFile := *tlsCAFile
+	defer func() {
+		*tlsSkipVerify = oldSkipVerify
+		*tlsCAFile = oldCAFile
+	}()
+
+	*tlsSkipVerify = false
+	*tlsCAFile = ""
+
+	config, err := loadTLSConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// With no TLS flags, client should return nil to indicate plain TCP.
+	if config != nil {
+		t.Fatal("expected nil config when no TLS flags are provided")
+	}
+}
+
+// TestLoadTLSConfigWithSkipVerify tests that `loadTLSConfig` sets `InsecureSkipVerify` when flag is set.
+func TestLoadTLSConfigWithSkipVerify(t *testing.T) {
+	oldSkipVerify := *tlsSkipVerify
+	oldCAFile := *tlsCAFile
+	defer func() {
+		*tlsSkipVerify = oldSkipVerify
+		*tlsCAFile = oldCAFile
+	}()
+
+	*tlsSkipVerify = true
+	*tlsCAFile = ""
+
+	var logBuf bytes.Buffer
+	oldOutput := log.Writer()
+	oldFlags := log.Flags()
+	oldPrefix := log.Prefix()
+
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(oldOutput)
+		log.SetFlags(oldFlags)
+		log.SetPrefix(oldPrefix)
+	}()
+
+	config, err := loadTLSConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config == nil {
+		t.Fatal("expected a non-nil config")
+	}
+	if !config.InsecureSkipVerify {
+		t.Fatal("expected InsecureSkipVerify to be true")
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "WARNING: TLS certificate verification is disabled") {
+		t.Fatalf("expected warning message in log, got: %q", logOutput)
+	}
+}
+
+// TestLoadTLSConfigWithCAFile tests that `loadTLSConfig` expectedly loads a CA file.
+func TestLoadTLSConfigWithCAFile(t *testing.T) {
+	oldSkipVerify := *tlsSkipVerify
+	oldCAFile := *tlsCAFile
+	defer func() {
+		*tlsSkipVerify = oldSkipVerify
+		*tlsCAFile = oldCAFile
+	}()
+
+	*tlsSkipVerify = false
+	caFile := generateTestCACert(t)
+	*tlsCAFile = caFile
+
+	config, err := loadTLSConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if config.RootCAs == nil {
+		t.Fatal("expected RootCAs to be set when the CA file is provided")
+	}
+	if config.InsecureSkipVerify {
+		t.Fatal("expected InsecureSkipVerify to be false when the CA file is provided")
+	}
+}
+
+// TestLoadTLSConfigWithInvalidCAFile tests that `loadTLSConfig` returns an error for an invalid CA file.
+func TestLoadTLSConfigWithInvalidCAFile(t *testing.T) {
+	oldSkipVerify := *tlsSkipVerify
+	oldCAFile := *tlsCAFile
+	defer func() {
+		*tlsSkipVerify = oldSkipVerify
+		*tlsCAFile = oldCAFile
+	}()
+
+	*tlsSkipVerify = false
+	*tlsCAFile = "/nonexistent/ca.crt"
+
+	config, err := loadTLSConfig()
+	if err == nil {
+		t.Fatal("expected error for the invalid CA file")
+	}
+	if config != nil {
+		t.Fatal("expected nil config on error")
+	}
+	if !strings.Contains(err.Error(), "failed to read the CA certificate") {
+		t.Fatalf("expected 'failed to read the CA certificate' in error, got: %v", err)
+	}
+}
+
+// TestLoadTLSConfigWithInvalidCACertificate tests that `loadTLSConfig` returns an error for invalid CA certificate content.
+func TestLoadTLSConfigWithInvalidCACertificate(t *testing.T) {
+	oldSkipVerify := *tlsSkipVerify
+	oldCAFile := *tlsCAFile
+	defer func() {
+		*tlsSkipVerify = oldSkipVerify
+		*tlsCAFile = oldCAFile
+	}()
+
+	*tlsSkipVerify = false
+	tmpFile := filepath.Join(t.TempDir(), "invalid.crt")
+	if err := os.WriteFile(tmpFile, []byte("invalid certificate data"), 0644); err != nil {
+		t.Fatalf("failed to create the invalid cert file: %v", err)
+	}
+	*tlsCAFile = tmpFile
+
+	config, err := loadTLSConfig()
+	if err == nil {
+		t.Fatal("expected error for the invalid CA certificate")
+	}
+	if config != nil {
+		t.Fatal("expected nil config on error")
+	}
+	if !strings.Contains(err.Error(), "failed to parse the CA certificate") {
+		t.Fatalf("expected 'failed to parse the CA certificate' in error, got: %v", err)
+	}
+}
+
+// TestDialWithTLSWithoutTLS tests that `dialWithTLS` uses plain TCP when TLS config is nil to ensure that
+// `dialWithTLS` expectedly falls back to plain TCP when no TLS config is provided.
+func TestDialWithTLSWithoutTLS(t *testing.T) {
+	oldSkipVerify := *tlsSkipVerify
+	oldCAFile := *tlsCAFile
+	defer func() {
+		*tlsSkipVerify = oldSkipVerify
+		*tlsCAFile = oldCAFile
+	}()
+
+	*tlsSkipVerify = false
+	*tlsCAFile = ""
+
+	// Verify that `loadTLSConfig` returns nil when no TLS flags are set (plain TCP path).
+	tlsConfig, err := loadTLSConfig()
+	if err != nil {
+		t.Fatalf("unexpected error loading TLS config: %v", err)
+	}
+	if tlsConfig != nil {
+		t.Fatal("expected nil TLS config (plain TCP)")
+	}
+
+	// Test that `dialWithTLS` attempts to connect using plain TCP (since `tlsConfig` has no `RootCAs`,
+	// it will use system defaults, but `dialWithTLS` will use plain TCP when `tlsConfig` is effectively nil).
+	// We expect it to fail with connection refused since there's no server, but it should not fail
+	// due to TLS configuration issues.
+	_, err = dialWithTLS("tcp", "127.0.0.1:0", 100*time.Millisecond)
+	// Expect a connection error (not a TLS config error).
+	if err != nil {
+		// Verify the error is a connection error rather than a TLS configuration error.
+		if strings.Contains(err.Error(), "failed to load the TLS configuration") {
+			t.Fatalf("unexpected TLS configuration error: %v", err)
+		}
+		// Connection refused or timeout is expected since there's no server.
+		if !strings.Contains(err.Error(), "connection") && !strings.Contains(err.Error(), "timeout") {
+			t.Logf("connection attempt returned: %v (this is expected when no server is listening)", err)
+		}
+	}
+}
+
+// TestDialWithTLSWithInvalidAddress tests that `dialWithTLS` returns an error for an invalid address.
+func TestDialWithTLSWithInvalidAddress(t *testing.T) {
+	oldSkipVerify := *tlsSkipVerify
+	oldCAFile := *tlsCAFile
+	defer func() {
+		*tlsSkipVerify = oldSkipVerify
+		*tlsCAFile = oldCAFile
+	}()
+
+	*tlsSkipVerify = false
+	*tlsCAFile = ""
+
+	// `127.0.0.1:0` is an invalid address for dialing since port 0 is not valid for clients to connect to.
+	conn, err := dialWithTLS("tcp", "127.0.0.1:0", 100*time.Millisecond)
+	if err == nil {
+		if conn != nil {
+			if err := conn.Close(); err != nil {
+				t.Fatalf("failed to close the connection: %v", err)
+			}
+		}
+		t.Fatal("expected error for the invalid address")
+	}
+}
+
+// TestDialWithTLSWithSkipVerify ensures the TLS branch is used when `skip-verify` is set.
+func TestDialWithTLSWithSkipVerify(t *testing.T) {
+	oldSkipVerify := *tlsSkipVerify
+	oldCAFile := *tlsCAFile
+	defer func() {
+		*tlsSkipVerify = oldSkipVerify
+		*tlsCAFile = oldCAFile
+	}()
+
+	*tlsSkipVerify = true
+	*tlsCAFile = ""
+
+	// This forces the TLS path; connection will fail due to invalid address, which is acceptable for this test.
+	_, err := dialWithTLS("tcp", "127.0.0.1:0", 100*time.Millisecond)
+	if err != nil {
+		if strings.Contains(err.Error(), "failed to load the TLS configuration") {
+			t.Fatalf("unexpected TLS configuration error: %v", err)
+		}
+		// Expect a connection error or timeout since no server listens.
+		if !strings.Contains(err.Error(), "connection") && !strings.Contains(err.Error(), "timeout") {
+			t.Logf("dial returned: %v (expected with no server)", err)
+		}
+	}
+}
+
+// TestDialWithTLSErrorOnInvalidCA covers the `loadTLSConfig` error path within `dialWithTLS`.
+func TestDialWithTLSErrorOnInvalidCA(t *testing.T) {
+	oldSkipVerify := *tlsSkipVerify
+	oldCAFile := *tlsCAFile
+	defer func() {
+		*tlsSkipVerify = oldSkipVerify
+		*tlsCAFile = oldCAFile
+	}()
+
+	*tlsSkipVerify = false
+	*tlsCAFile = "/nonexistent/ca.crt"
+
+	_, err := dialWithTLS("tcp", "127.0.0.1:0", 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected error when TLS config fails to load")
+	}
+	if !strings.Contains(err.Error(), "failed to load the TLS configuration") {
+		t.Fatalf("expected load TLS configuration error, got: %v", err)
 	}
 }

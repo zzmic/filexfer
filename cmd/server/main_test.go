@@ -3,8 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"filexfer/protocol"
 	"log"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -777,5 +784,191 @@ func TestReadSetReadDeadlineFailure(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("expected error when SetReadDeadline fails on closed connection")
+	}
+}
+
+// generateTestCert generates a self-signed TLS certificate for testing.
+func generateTestCert(t *testing.T) (certFile, keyFile string) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	certFile = filepath.Join(tmpDir, "test.crt")
+	keyFile = filepath.Join(tmpDir, "test.key")
+
+	// Generates a 2048-bit RSA key.
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate the private key: %v", err)
+	}
+
+	// Create a certificate template.
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"Test"},
+			CommonName:   "localhost",
+		},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)},
+		DNSNames:    []string{"localhost"},
+	}
+
+	// Create a self-signed certificate valid for 365 days.
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("failed to create the certificate: %v", err)
+	}
+
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		t.Fatalf("failed to create the certificate file: %v", err)
+	}
+	defer func() {
+		if err := certOut.Close(); err != nil {
+			t.Fatalf("failed to close the certificate file: %v", err)
+		}
+	}()
+
+	// Encode and write the certificate to a PEM file.
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		t.Fatalf("failed to write the certificate: %v", err)
+	}
+
+	keyOut, err := os.Create(keyFile)
+	if err != nil {
+		t.Fatalf("failed to create the key file: %v", err)
+	}
+	defer func() {
+		if err := keyOut.Close(); err != nil {
+			t.Fatalf("failed to close the key file: %v", err)
+		}
+	}()
+
+	// Encode and write the private key to a PEM file.
+	keyDER := x509.MarshalPKCS1PrivateKey(key)
+	if err := pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER}); err != nil {
+		t.Fatalf("failed to write the key: %v", err)
+	}
+
+	return certFile, keyFile
+}
+
+// TestLoadTLSConfigNoCertificates tests that `loadTLSConfig` returns nil when no certificates are provided.
+func TestLoadTLSConfigNoCertificates(t *testing.T) {
+	oldCertFile := *tlsCertFile
+	oldKeyFile := *tlsKeyFile
+	defer func() {
+		*tlsCertFile = oldCertFile
+		*tlsKeyFile = oldKeyFile
+	}()
+
+	*tlsCertFile = ""
+	*tlsKeyFile = ""
+
+	config, err := loadTLSConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config != nil {
+		t.Fatal("expected nil config when no certificates are provided")
+	}
+}
+
+// TestLoadTLSConfigWithValidCertificates tests that `loadTLSConfig` expectedly loads valid certificates.
+func TestLoadTLSConfigWithValidCertificates(t *testing.T) {
+	oldCertFile := *tlsCertFile
+	oldKeyFile := *tlsKeyFile
+	defer func() {
+		*tlsCertFile = oldCertFile
+		*tlsKeyFile = oldKeyFile
+	}()
+
+	certFile, keyFile := generateTestCert(t)
+	*tlsCertFile = certFile
+	*tlsKeyFile = keyFile
+
+	config, err := loadTLSConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config == nil {
+		t.Fatal("expected non-nil config when certificates are provided")
+	}
+	if len(config.Certificates) != 1 {
+		t.Fatalf("expected 1 certificate, got %d", len(config.Certificates))
+	}
+	if config.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("expected TLS 1.2 minimum version, got %x", config.MinVersion)
+	}
+}
+
+// TestLoadTLSConfigWithInvalidCertFile tests that `loadTLSConfig` returns an error for invalid certificate file paths.
+func TestLoadTLSConfigWithInvalidCertFile(t *testing.T) {
+	oldCertFile := *tlsCertFile
+	oldKeyFile := *tlsKeyFile
+	defer func() {
+		*tlsCertFile = oldCertFile
+		*tlsKeyFile = oldKeyFile
+	}()
+
+	*tlsCertFile = "/nonexistent/cert.crt"
+	*tlsKeyFile = "/nonexistent/key.key"
+
+	config, err := loadTLSConfig()
+	if err == nil {
+		t.Fatal("expected error for the invalid certificate file")
+	}
+	if config != nil {
+		t.Fatal("expected nil config on error")
+	}
+	if !strings.Contains(err.Error(), "failed to load the TLS certificate") {
+		t.Fatalf("expected 'failed to load the TLS certificate' in error, got: %v", err)
+	}
+}
+
+// TestLoadTLSConfigWithOnlyCertFile tests that `loadTLSConfig` returns nil when only a cert file is provided.
+func TestLoadTLSConfigWithOnlyCertFile(t *testing.T) {
+	oldCertFile := *tlsCertFile
+	oldKeyFile := *tlsKeyFile
+	defer func() {
+		*tlsCertFile = oldCertFile
+		*tlsKeyFile = oldKeyFile
+	}()
+
+	certFile, _ := generateTestCert(t)
+	*tlsCertFile = certFile
+	*tlsKeyFile = ""
+
+	config, err := loadTLSConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config != nil {
+		t.Fatal("expected nil config when only the cert file is provided")
+	}
+}
+
+// TestLoadTLSConfigWithOnlyKeyFile tests that `loadTLSConfig` returns nil when only a key file is provided.
+func TestLoadTLSConfigWithOnlyKeyFile(t *testing.T) {
+	oldCertFile := *tlsCertFile
+	oldKeyFile := *tlsKeyFile
+	defer func() {
+		*tlsCertFile = oldCertFile
+		*tlsKeyFile = oldKeyFile
+	}()
+
+	_, keyFile := generateTestCert(t)
+	*tlsCertFile = ""
+	*tlsKeyFile = keyFile
+
+	config, err := loadTLSConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config != nil {
+		t.Fatal("expected nil config when only the key file is provided")
 	}
 }
