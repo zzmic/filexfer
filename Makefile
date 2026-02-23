@@ -8,7 +8,6 @@ GOVET = $(GOCMD) vet
 
 LDFLAGS = -ldflags "-s -w" # For smaller binaries by stripping debug info.
 RACE_FLAG = -race
-# RACE_FLAG =
 
 BINARY_DIR = bin
 CLIENT_BINARY = $(BINARY_DIR)/client
@@ -56,7 +55,7 @@ vet:
 
 clean:
 	$(GOCLEAN)
-	rm -r $(BINARY_DIR)/*
+	rm -fv $(BINARY_DIR)/*
 
 deps:
 	$(GOMOD) tidy
@@ -76,8 +75,8 @@ install: build
 
 uninstall:
 	@echo "$(YELLOW)Uninstalling binaries...$(RESET)"
-	rm -f $(GOPATH)/bin/client
-	rm -f $(GOPATH)/bin/server
+	rm -fv $(GOPATH)/bin/client
+	rm -fv $(GOPATH)/bin/server
 	@echo "$(GREEN)Uninstalled.$(RESET)"
 
 ARGS ?=
@@ -114,7 +113,6 @@ test-directory-limit-sh:
 	chmod +x test_directory_limit.sh
 	./test_directory_limit.sh
 
-# Help target.
 help:
 	@echo 'Usage: make <target> [VAR=value]'
 	@echo
