@@ -46,7 +46,7 @@ done
 
 # Calculate the total size of the directory.
 echo "Calculating directory size..."
-total_size=$(du -sk ./large_test_dir | cut -f1)
+total_size=$(du -sk ./large_test_dir | cut -f1) || true
 total_size_bytes=$((total_size * 1024))
 echo "Total directory size: $((total_size_bytes / 1024 / 1024)) MB"
 
@@ -55,9 +55,10 @@ echo "Building applications..."
 go build -o ./bin/client ./cmd/client/main.go && go build -o ./bin/server ./cmd/server/main.go
 
 # Check if the port is already in use.
-if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null ; then
+if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null; then
     echo "Port 8080 is already in use. Killing the existing process..."
-    kill "$(lsof -Pi :8080 -sTCP:LISTEN -t)"
+    pid=$(lsof -Pi :8080 -sTCP:LISTEN -t)
+    kill "$pid" 2>/dev/null || true
     sleep 3
 fi
 
@@ -78,8 +79,8 @@ echo "Checking transferred files..."
 ls -la ./large_test_output/large_test_dir/ 2>/dev/null || echo "Directory not found"
 
 # Count files in original vs transferred.
-original_count=$(find ./large_test_dir -type f | wc -l)
-transferred_count=$(find ./large_test_output -type f 2>/dev/null | wc -l)
+original_count=$(find ./large_test_dir -type f | wc -l) || true
+transferred_count=$(find ./large_test_output -type f 2>/dev/null | wc -l) || true
 
 echo "Original files: $original_count"
 echo "Transferred files: $transferred_count"
@@ -99,7 +100,8 @@ if kill $SERVER_PID 2>/dev/null; then
 fi
 # Kill any remaining process on port 8080 if it is still in use.
 if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    kill "$(lsof -Pi :8080 -sTCP:LISTEN -t)" 2>/dev/null
+    pid=$(lsof -Pi :8080 -sTCP:LISTEN -t)
+    kill "$pid" 2>/dev/null || true
     sleep 1
 fi
 # Remove the test directories created in the script.

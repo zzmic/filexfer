@@ -6,16 +6,16 @@ echo "Starting testing..."
 # Create the test files and directories.
 echo "Creating test files..."
 mkdir -p ./test/subdir1/subdir2
-echo "./test/root_file.txt content" > ./test/root_file.txt
-echo "./test/subdir1/file1.txt content" > ./test/subdir1/file1.txt
-echo "./test/subdir1/subdir2/file2.txt content" > ./test/subdir1/subdir2/file2.txt
-echo "./test/file2.txt content" > ./test/file2.txt
-echo "./test/file3.txt content" > ./test/file3.txt
+echo "./test/root_file.txt content" >./test/root_file.txt
+echo "./test/subdir1/file1.txt content" >./test/subdir1/file1.txt
+echo "./test/subdir1/subdir2/file2.txt content" >./test/subdir1/subdir2/file2.txt
+echo "./test/file2.txt content" >./test/file2.txt
+echo "./test/file3.txt content" >./test/file3.txt
 
 # Create more test files of different scenarios.
-echo "./test/file0.txt content" > ./test/file0.txt
-echo '{"key": "value"}' > ./test/file1.txt
-echo '{"another_key": "another_value"}' > ./test.json
+echo "./test/file0.txt content" >./test/file0.txt
+echo '{"key": "value"}' >./test/file1.txt
+echo '{"another_key": "another_value"}' >./test.json
 touch ./empty_file.txt
 dd if=/dev/zero of=./large_file.dat bs=1M count=500 2>/dev/null # Create a large file of size 500MB which is simply zero-filled.
 
@@ -25,9 +25,10 @@ go build -o ./bin/client ./cmd/client/main.go && go build -o ./bin/server ./cmd/
 
 # Check if the port is already in use.
 # If it is, kill the existing process.
-if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null ; then
+if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null; then
     echo "Port 8080 is already in use. Killing the existing process..."
-    kill "$(lsof -Pi :8080 -sTCP:LISTEN -t)"
+    pid=$(lsof -Pi :8080 -sTCP:LISTEN -t)
+    kill "$pid" 2>/dev/null || true
     sleep 3
 fi
 
@@ -89,7 +90,8 @@ if kill $SERVER_PID 2>/dev/null; then
 fi
 # Kill any remaining process on port 8080 if it is still in use.
 if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    kill "$(lsof -Pi :8080 -sTCP:LISTEN -t)" 2>/dev/null
+    pid=$(lsof -Pi :8080 -sTCP:LISTEN -t)
+    kill "$pid" 2>/dev/null || true
     sleep 1
 fi
 # Remove the test output directory.
